@@ -183,8 +183,8 @@ HaloLrcSync/
 
 ## 参考项目
 
-- [HaloPixelToolBox](https://github.com/XFEstudio/HaloPixelToolBox) - C# 实现的歌词同步工具
-- [hidapi](https://github.com/libusb/hidapi) - HID 设备通信库
+- `https://github.com/XFEstudio/HaloPixelToolBox` - C# 实现的歌词同步工具
+- `https://github.com/libusb/hidapi` - HID 设备通信库
 
 ## 免责声明
 
@@ -192,5 +192,5 @@ HaloLrcSync/
 
 ## Author
 
-**nxz1026**  
-- GitHub: [@nxz1026](https://github.com/nxz1026)  
+**nxz1026**
+- GitHub: `https://github.com/nxz1026`
