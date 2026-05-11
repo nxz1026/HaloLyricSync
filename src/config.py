@@ -13,11 +13,6 @@ class Config:
     """配置管理器"""
     
     DEFAULT_CONFIG = {
-        "netease": {
-            "host": "127.0.0.1",
-            "port": 50545,
-            "api_timeout": 5
-        },
         "lyrics": {
             "scroll_speed": 1,
             "display_duration": 3,
@@ -25,17 +20,14 @@ class Config:
             "sync_offset_ms": 0,
             "max_chars_per_line": 20
         },
-        "usb": {
-            "device_id": "",
-            "baud_rate": 9600,
-            "timeout": 2,
-            "auto_detect": True
+        "hid": {
+            "auto_detect": True,
+            "device_keywords": ["halo", "pixel", "花再", "pixelbar"]
         },
         "app": {
             "log_level": "INFO",
             "cache_dir": "cache",
-            "auto_start": False,
-            "minimize_to_tray": False
+            "auto_start": False
         }
     }
     

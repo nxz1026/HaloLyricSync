@@ -119,14 +119,24 @@ class HaloPixelCommunicator:
             enumerated = hidapi.hid.enumerate()
             
             for dev in enumerated:
+                # 获取设备属性（hidapi返回对象而非字典）
+                def get_attr(obj, name):
+                    """安全获取对象属性"""
+                    for attr in [name, name.replace('_', ''), name.replace('_string', '')]:
+                        if hasattr(obj, attr):
+                            val = getattr(obj, attr)
+                            if val is not None:
+                                return val if isinstance(val, str) else str(val) if isinstance(val, int) else ""
+                    return ""
+                
                 info = HidDeviceInfo(
-                    path=dev["path"],
-                    vendor_id=dev["vendor_id"],
-                    product_id=dev["product_id"],
-                    serial_number=dev["serial_number"] or "",
-                    manufacturer_string=dev["manufacturer_string"] or "",
-                    product_string=dev["product_string"] or "",
-                    release_number=dev["release_number"]
+                    path=get_attr(dev, "path"),
+                    vendor_id=get_attr(dev, "vendor_id") or 0,
+                    product_id=get_attr(dev, "product_id") or 0,
+                    serial_number=get_attr(dev, "serial_number"),
+                    manufacturer_string=get_attr(dev, "manufacturer_string"),
+                    product_string=get_attr(dev, "product_string"),
+                    release_number=int(get_attr(dev, "release_number") or "0") or 0
                 )
                 devices.append(info)
                 

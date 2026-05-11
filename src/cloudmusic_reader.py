@@ -12,22 +12,8 @@ import ctypes.wintypes
 import struct
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Tuple
-
-try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
-
-try:
-    from pymem import PyMem
-    from pymem.memory import read_memory
-    HAS_PYMEM = True
-except ImportError:
-    HAS_PYMEM = False
+from typing import Optional, List
 
 
 # 网易云音乐版本对应的内存地址偏移
@@ -40,14 +26,6 @@ VERSION_ADDRESS_MAP = {
     "3.1.26": (0x01DD5130, 0xE8, 0x38, 0x120, 0x18, 0x0),
     "3.1.25": (0x01DAFF60, 0xE0, 0x8, 0x128, 0x18, 0x0),
 }
-
-
-@dataclass
-class LyricsInfo:
-    """歌词信息"""
-    lyrics: str
-    timestamp: Optional[str] = None
-
 
 class CloudMusicMemoryReader:
     """网易云音乐内存读取器"""
@@ -69,13 +47,12 @@ class CloudMusicMemoryReader:
         Returns:
             初始化是否成功
         """
-        if not HAS_PSUTIL:
-            print("[CloudMusic] 需要安装 psutil: pip install psutil")
-            return False
+        import psutil
         
         # 查找网易云音乐进程
         process = self._find_process()
         if not process:
+            print("[CloudMusic] 未找到网易云音乐进程")
             return False
         
         self.process_id = process.pid
@@ -99,13 +76,12 @@ class CloudMusicMemoryReader:
     
     def _find_process(self):
         """查找网易云音乐进程"""
+        import psutil
+        
         for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
                 if proc.info['name'] and 'cloudmusic' in proc.info['name'].lower():
-                    # 确认有桌面歌词窗口
-                    windows = proc.windows()
-                    if any('桌面歌词' in w.title or w.title for w in windows):
-                        return proc
+                    return proc
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return None
@@ -248,8 +224,7 @@ def find_cloudmusic_version() -> Optional[str]:
     Returns:
         版本字符串
     """
-    if not HAS_PSUTIL:
-        return None
+    import psutil
     
     for proc in psutil.process_iter(['pid', 'name', 'exe']):
         try:
