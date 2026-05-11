@@ -189,3 +189,8 @@ HaloLrcSync/
 ## 免责声明
 
 本项目仅用于学习和研究目的，请勿用于商业用途。歌词版权归原作者所有。
+
+## Author
+
+**nxz1026**  
+- GitHub: [@nxz1026](https://github.com/nxz1026)  
