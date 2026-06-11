@@ -27,7 +27,7 @@ VERSION_ADDRESS_MAP = {
 
 # 测试用的绝对地址（如果设置，将直接使用此地址而非通过指针链计算）
 # 例如: TEST_ABSOLUTE_ADDRESS = 0x239D06F1F10
-TEST_ABSOLUTE_ADDRESS = 0x239D06F1F10  # 设置为 None 禁用，或设置为具体地址
+TEST_ABSOLUTE_ADDRESS = None  # 设置为 None 禁用，或设置为具体地址
 
 class CloudMusicMemoryReader:
     """网易云音乐内存读取器"""
@@ -60,13 +60,8 @@ class CloudMusicMemoryReader:
         self.process_id = process.pid
         print(f"[CloudMusic] 找到进程: {process.name()} (PID: {self.process_id})")
         
-        # 获取版本信息
+        # 获取版本信息 - psutil没有version()方法，使用exe路径推断
         try:
-            version_info = process.version()
-            self.version = self._parse_version(version_info)
-            print(f"[CloudMusic] 版本: {self.version}")
-        except (AttributeError, Exception) as e:
-            print(f"[CloudMusic] 获取版本失败: {e}")
             # 尝试从 exe 路径获取版本
             try:
                 exe_path = process.exe()
@@ -253,7 +248,8 @@ def find_cloudmusic_version() -> Optional[str]:
     for proc in psutil.process_iter(['pid', 'name', 'exe']):
         try:
             if proc.info['name'] and 'cloudmusic' in proc.info['name'].lower():
-                return proc.version()
+                # psutil没有version()方法，返回None
+                return None
         except Exception:
             continue
     return None

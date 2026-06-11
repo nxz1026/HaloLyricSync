@@ -127,9 +127,9 @@ class Config:
 # 全局配置实例
 _config_instance = None
 
-def get_config() -> Config:
+def get_config(config_path: str = None) -> Config:
     """获取全局配置实例"""
     global _config_instance
     if _config_instance is None:
-        _config_instance = Config()
+        _config_instance = Config(config_path)
     return _config_instance

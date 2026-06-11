@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-USB HID通信模块 - 与HALO OIXELBAR音箱通信
+USB HID通信模块 - 与HALO PIXELBAR音箱通信
 
 使用HID协议与设备通信，参考HaloPixelToolBox项目实现
 
@@ -55,7 +55,7 @@ class HidError(Exception):
 
 
 class HaloPixelCommunicator:
-    """HALO OIXELBAR HID通信器"""
+    """HALO PIXELBAR HID通信器"""
     
     # 设备名称关键字
     DEVICE_KEYWORDS = ["halo", "pixel", "花再", "pixelbar"]
@@ -138,7 +138,7 @@ class HaloPixelCommunicator:
     @staticmethod
     def find_halo_devices() -> List[HidDeviceInfo]:
         """
-        查找所有HALO OIXELBAR设备
+        查找所有HALO PIXELBAR设备
         
         Returns:
             匹配的设备列表
@@ -201,7 +201,7 @@ class HaloPixelCommunicator:
             if not path:
                 halo_devices = self.find_halo_devices()
                 if not halo_devices:
-                    print("[HID] 未找到HALO OIXELBAR设备")
+                    print("[HID] 未找到HALO PIXELBAR设备")
                     return False
                 path = halo_devices[0].path
                 self.device_info = halo_devices[0]
@@ -447,7 +447,7 @@ def get_usb_communicator() -> HaloPixelCommunicator:
 if __name__ == "__main__":
     # 测试代码
     print("=" * 60)
-    print("HALO OIXELBAR HID通信测试")
+    print("HALO PIXELBAR HID通信测试")
     print("=" * 60)
     
     # 列出所有设备

@@ -17,7 +17,7 @@
 - **操作系统**: Windows 10/11
 - **Python**: 3.8 或更高版本
 - **网易云音乐**: 3.1.25 - 3.1.30 版本
-- **硬件**: HALO OIXELBAR 音箱 + USB 数据线
+- **硬件**: HALO PIXELBAR 音箱 + USB 数据线
 - **权限**: 管理员权限（用于 HID 通信和内存读取）
 
 ## 快速开始
@@ -49,7 +49,7 @@ python src/main.py
 1. 以管理员身份运行程序
 2. 打开网易云音乐并播放歌曲
 3. 开启网易云音乐的桌面歌词功能
-4. 通过 USB 连接 HALO OIXELBAR 音箱
+4. 通过 USB 连接 HALO PIXELBAR 音箱
 
 ### 命令行选项
 
@@ -80,7 +80,7 @@ python src/main.py --list-devices  # 列出 HID 设备
         │
         │ HID Write (64字节包)
         ▼
-  HALO OIXELBAR 音箱
+  HALO PIXELBAR 音箱
 ```
 
 ## 项目结构

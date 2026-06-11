@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HALO OIXELBAR 歌词同步主程序
+HALO PIXELBAR 歌词同步主程序
 直接从网易云音乐进程中读取歌词，无需API
 
 参考项目：
@@ -55,6 +55,7 @@ class LyricSynchronizer:
         if not self.reader.initialize():
             print("[Sync] 网易云音乐未运行或版本不支持")
             print(f"[Sync] 支持的版本: {', '.join(get_supported_versions())}")
+            return
         
         # 连接HID设备
         if not self.hid.connect():
@@ -253,14 +254,14 @@ def check_status():
 def main():
     """主函数"""
     print("=" * 60)
-    print("HALO OIXELBAR 歌词同步器")
+    print("HALO PIXELBAR 歌词同步器")
     print("(内存读取 + HID协议)")
     print("=" * 60)
     
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="HALO OIXELBAR 歌词同步器",
+        description="HALO PIXELBAR 歌词同步器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -271,7 +272,7 @@ def main():
 前提条件:
   1. 网易云音乐已安装并运行
   2. 网易云音乐开启了桌面歌词功能
-  3. 电脑已连接 HALO OIXELBAR 音箱
+  3. 电脑已连接 HALO PIXELBAR 音箱
   4. 以管理员权限运行（Windows)
         """
     )

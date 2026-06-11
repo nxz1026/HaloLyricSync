@@ -1,8 +1,8 @@
 @echo off
-REM HALO OIXELBAR 歌词同步器 - Windows启动脚本
+REM HALO PIXELBAR 歌词同步器 - Windows启动脚本
 
 echo ========================================
-echo HALO OIXELBAR 歌词同步器
+echo HALO PIXELBAR 歌词同步器
 echo ========================================
 echo.
 
