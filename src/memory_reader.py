@@ -60,24 +60,9 @@ class CloudMusicMemoryReader:
         self.process_id = process.pid
         print(f"[CloudMusic] 找到进程: {process.name()} (PID: {self.process_id})")
         
-        # 获取版本信息 - psutil没有version()方法，使用exe路径推断
-        try:
-            # 尝试从 exe 路径获取版本
-            try:
-                exe_path = process.exe()
-                import os
-                if os.path.exists(exe_path):
-                    file_version = ctypes.windll.version.GetFileVersionInfoSizeW(exe_path, None)
-                    if file_version:
-                        buffer = ctypes.create_string_buffer(file_version)
-                        ctypes.windll.version.GetFileVersionInfoW(exe_path, 0, file_version, buffer)
-                        # 简单处理：假设版本在文件名或路径中
-                        self.version = "3.1.32"  # 默认使用最新版本
-                        print(f"[CloudMusic] 使用默认版本: {self.version}")
-            except:
-                self.version = "3.1.32"
-                print(f"[CloudMusic] 使用默认版本: {self.version}")
-            # 不要在这里 return，继续执行 _resolve_address
+        # 获取版本信息 - psutil没有version()方法，使用默认版本
+        self.version = "3.1.32"
+        print(f"[CloudMusic] 使用默认版本: {self.version}")
         
         # 解析歌词地址
         if not self._resolve_address():
