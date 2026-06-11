@@ -24,12 +24,12 @@ from .hid_packet_builder import HidPacketBuilder, TextLayout, UIModel
 
 # 尝试导入HID库
 try:
-    import hidapi
+    import hid
     HAS_HIDAPI = True
 except ImportError:
     HAS_HIDAPI = False
-    print("[HID] hidapi未安装，将使用模拟模式")
-    print("[HID] 安装命令: pip install hidapi")
+    print("[HID] hid库未安装,将使用模拟模式")
+    print("[HID] 安装命令: pip install hid")
 
 
 @dataclass
@@ -85,7 +85,7 @@ class HaloPixelCommunicator:
     def _init_hid(self) -> None:
         """初始化HID库"""
         try:
-            hidapi.hid_init()
+            # hid库不需要显式初始化
             print("[HID] HID库初始化成功")
         except Exception as e:
             print(f"[HID] HID库初始化失败: {e}")
@@ -115,25 +115,18 @@ class HaloPixelCommunicator:
             return devices
         
         try:
-            enumerated = hidapi.hid.enumerate()
+            enumerated = hid.enumerate()
             
             for dev in enumerated:
-                def get_attr(obj, name):
-                    for attr in [name, name.replace('_', ''), name.replace('_string', '')]:
-                        if hasattr(obj, attr):
-                            val = getattr(obj, attr)
-                            if val is not None:
-                                return val if isinstance(val, str) else str(val) if isinstance(val, int) else ""
-                    return ""
-                
+                # hid.enumerate() 返回字典列表
                 info = HidDeviceInfo(
-                    path=get_attr(dev, "path"),
-                    vendor_id=int(get_attr(dev, "vendor_id") or "0"),
-                    product_id=int(get_attr(dev, "product_id") or "0"),
-                    serial_number=get_attr(dev, "serial_number"),
-                    manufacturer_string=get_attr(dev, "manufacturer_string"),
-                    product_string=get_attr(dev, "product_string"),
-                    release_number=int(get_attr(dev, "release_number") or "0")
+                    path=dev.get('path', b'').decode('utf-8') if isinstance(dev.get('path'), bytes) else str(dev.get('path', '')),
+                    vendor_id=dev.get('vendor_id', 0),
+                    product_id=dev.get('product_id', 0),
+                    serial_number=dev.get('serial_number', ''),
+                    manufacturer_string=dev.get('manufacturer_string', ''),
+                    product_string=dev.get('product_string', ''),
+                    release_number=dev.get('release_number', 0)
                 )
                 devices.append(info)
                 
@@ -221,14 +214,15 @@ class HaloPixelCommunicator:
             
             # 打开设备
             try:
-                self.device = hidapi.hid.open_path(path)
+                self.device = hid.device()
+                self.device.open_path(path.encode('utf-8') if isinstance(path, str) else path)
                 
                 if not self.device:
                     print(f"[HID] 无法打开设备: {path}")
                     return False
                 
                 # 设置非阻塞模式
-                hidapi.hid.set_nonblocking(self.device, 1)
+                self.device.set_nonblocking(1)
                 
                 self.connected = True
                 device_name = self.device_info.name if self.device_info else "Unknown"
@@ -244,7 +238,7 @@ class HaloPixelCommunicator:
         with self._lock:
             if self.connected and self.device and not self._simulated:
                 try:
-                    hidapi.hid.close(self.device)
+                    self.device.close()
                 except:
                     pass
                 self.device = None
@@ -272,16 +266,16 @@ class HaloPixelCommunicator:
         
         try:
             with self._lock:
-                # HID数据包第一个字节是报告ID，通常为0
+                # HID数据包第一个字节是报告ID,通常为0
                 report = bytes([0x00]) + packet
-                
+                        
                 # 写入设备
-                result = hidapi.hid.write(self.device, report)
-                
+                result = self.device.write(report)
+                        
                 if result == -1:
                     print("[HID] 发送失败")
                     return False
-                
+                        
                 return True
                 
         except Exception as e:
