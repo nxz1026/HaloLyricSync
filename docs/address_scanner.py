@@ -119,10 +119,14 @@ def find_cloudmusic_process() -> Optional[psutil.Process]:
     """查找网易云音乐进程"""
     print("[扫描] 查找网易云音乐进程...")
 
-    for proc in psutil.process_iter(['pid', 'name', 'exe', 'version']):
+    for proc in psutil.process_iter(['pid', 'name', 'exe']):
         try:
             if proc.info['name'] and 'cloudmusic' in proc.info['name'].lower():
-                version = proc.info.get('version', '未知')
+                version = "未知"
+                try:
+                    version = proc.version()
+                except:
+                    pass
                 print(f"[找到] 进程: {proc.info['name']} (PID: {proc.pid})")
                 print(f"[找到] 版本: {version}")
                 return proc
@@ -298,18 +302,65 @@ def main():
 
     try:
         dll_base = None
-        for module in process.memory_maps():
-            if 'cloudmusic.dll' in module.path.lower():
-                dll_base = int(module.addr, 16)
-                print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
-                break
-
+        try:
+            # 尝试使用 memory_maps grouped
+            for module in process.memory_maps(grouped=False):
+                if hasattr(module, 'path') and 'cloudmusic.dll' in module.path.lower():
+                    if hasattr(module, 'addr'):
+                        dll_base = int(module.addr, 16)
+                    elif hasattr(module, 'rss'):
+                        # 某些版本的 psutil 返回不同结构
+                        dll_base = int(getattr(module, 'addr', '0x1D00000'), 16)
+                    print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
+                    break
+        except:
+            pass
+        
+        if not dll_base:
+            # 备用方法：查找进程模块
+            import ctypes.wintypes
+            TH32CS_SNAPMODULE = 0x00000008
+            MAX_PATH = 260
+            
+            class MODULEENTRY32(ctypes.Structure):
+                _fields_ = [
+                    ('dwSize', ctypes.c_ulong),
+                    ('th32ModuleID', ctypes.c_ulong),
+                    ('th32ProcessID', ctypes.c_ulong),
+                    ('GlblcntUsage', ctypes.c_ulong),
+                    ('ProccntUsage', ctypes.c_ulong),
+                    ('modBaseAddr', ctypes.POINTER(ctypes.c_byte)),
+                    ('modBaseSize', ctypes.c_ulong),
+                    ('hModule', ctypes.c_void_p),
+                    ('szModule', ctypes.c_char * (MAX_PATH + 1)),
+                    ('szExePath', ctypes.c_char * MAX_PATH)
+                ]
+            
+            hSnapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process.pid)
+            if hSnapshot != -1:
+                me32 = MODULEENTRY32()
+                me32.dwSize = ctypes.sizeof(MODULEENTRY32)
+                
+                if ctypes.windll.kernel32.Module32First(hSnapshot, ctypes.byref(me32)):
+                    while True:
+                        module_name = me32.szModule.decode('utf-8', errors='ignore').lower()
+                        if 'cloudmusic.dll' in module_name:
+                            dll_base = ctypes.cast(me32.modBaseAddr, ctypes.c_void_p).value
+                            print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
+                            break
+                        if not ctypes.windll.kernel32.Module32Next(hSnapshot, ctypes.byref(me32)):
+                            break
+                
+                ctypes.windll.kernel32.CloseHandle(hSnapshot)
+        
         if not dll_base:
             print("[警告] 未找到 cloudmusic.dll，尝试使用默认基址")
             dll_base = 0x1D00000
 
     except Exception as e:
         print(f"[错误] 获取模块信息失败: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     print()
