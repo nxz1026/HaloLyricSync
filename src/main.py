@@ -18,19 +18,24 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config import get_config
-from src.memory_reader import CloudMusicMemoryReader, find_cloudmusic_version, get_supported_versions
+from src.source import create_source
 from src.lyrics_parser import parse_lrc
 from src.hid_comm import get_hid_communicator, HaloPixelCommunicator
 from src.hid_packet_builder import TextLayout, UIModel
 
 
 class LyricSynchronizer:
-    """歌词同步器 - 使用内存读取方式 + HID通信"""
-    
-    def __init__(self):
-        """初始化"""
+    """歌词同步器 - 使用可插拔歌词源 + HID通信"""
+
+    def __init__(self, source=None):
+        """
+        初始化
+
+        Args:
+            source: 可选的歌词源实例，为 None 时从配置创建
+        """
         self.config = get_config()
-        self.reader = CloudMusicMemoryReader()
+        self.reader = source or self._create_source_from_config()
         self.hid = get_hid_communicator()
         self.running = False
         self.current_song_id = None
@@ -40,31 +45,44 @@ class LyricSynchronizer:
         self.last_lyrics_text = ""
         self.scroll_mode = False
         self.clock_mode = False
+
+    def _create_source_from_config(self):
+        """根据配置创建歌词源"""
+        source_type = self.config.get('source', 'type', default='lxmusic')
+        if source_type == 'lxmusic':
+            return create_source('lxmusic',
+                                http_api_url=self.config.get('source', 'lxmusic', 'http_api_url', default='') or None,
+                                http_api_token=self.config.get('source', 'lxmusic', 'http_api_token', default='') or None)
+        elif source_type == 'cloudmusic':
+            test_addr = self.config.get('source', 'cloudmusic', 'test_absolute_address', default=None)
+            return create_source('cloudmusic', test_absolute_address=test_addr)
+        else:
+            print(f"[Main] 未知的 source type: {source_type}，使用默认 lxmusic")
+            return create_source('lxmusic')
     
     def start(self):
         """启动同步器"""
         if self.running:
             print("[Sync] 已在运行中")
             return
-        
+
         self.running = True
         print("[Sync] 开始歌词同步...")
-        
-        # 初始化网易云音乐内存读取器
-        print("[Sync] 初始化网易云音乐内存读取器...")
+
+        # 初始化歌词源
+        print(f"[Sync] 初始化歌词源: {self.reader.name}...")
         if not self.reader.initialize():
-            print("[Sync] 网易云音乐未运行或版本不支持")
-            print(f"[Sync] 支持的版本: {', '.join(get_supported_versions())}")
+            print(f"[Sync] {self.reader.name} 未运行或不可用")
             return
-        
+
         # 连接HID设备
         if not self.hid.connect():
             print("[Sync] HID设备连接失败，使用模拟模式")
-        
+
         # 启动主循环线程
         sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
         sync_thread.start()
-        
+
         # 注册信号处理
         signal.signal(signal.SIGINT, self._handle_interrupt)
         signal.signal(signal.SIGTERM, self._handle_interrupt)
@@ -73,6 +91,9 @@ class LyricSynchronizer:
         """停止同步器"""
         print("[Sync] 正在停止...")
         self.running = False
+        # 关闭歌词源(停止 SSE 线程等)
+        if hasattr(self.reader, 'shutdown'):
+            self.reader.shutdown()
         self.hid.clear_display()
         self.hid.disconnect()
         print("[Sync] 已停止")
@@ -90,34 +111,34 @@ class LyricSynchronizer:
         
         while self.running:
             try:
-                # 检查网易云音乐是否还在运行
+                # 检查播放器是否还在运行
                 if not self.reader.is_ready():
-                    print("[Sync] 网易云音乐已关闭，等待重新启动...")
+                    print(f"[Sync] {self.reader.name} 已关闭，等待重新启动...")
                     time.sleep(2)
                     if self.reader.initialize():
-                        print("[Sync] 网易云音乐已重新连接")
+                        print(f"[Sync] {self.reader.name} 已重新连接")
                         show_startup = True
                     continue
-                
+
                 # 读取歌词
                 lyrics = self.reader.read_lyrics()
-                
+
                 if lyrics and lyrics != self.last_lyrics_text:
                     self.last_lyrics_text = lyrics
                     no_lyrics_count = 0
-                    
+
                     if self.clock_mode:
                         self.clock_mode = False
                         self.scroll_mode = False
                         print("[Sync] 恢复歌词显示模式")
-                    
+
                     if show_startup:
                         print(f"\n{'='*60}")
-                        print("[Sync] 网易云歌词同步已启动!")
+                        print(f"[Sync] {self.reader.name} 歌词同步已启动!")
                         print(f"[Sync] 版本: {self.reader.version}")
                         print(f"{'='*60}\n")
                         show_startup = False
-                    
+
                     self._process_lyrics(lyrics)
                 else:
                     no_lyrics_count += 1
@@ -238,31 +259,31 @@ def check_status():
     print("=" * 60)
     print("状态检查")
     print("=" * 60)
-    
-    # 检查网易云音乐
-    version = find_cloudmusic_version()
-    if version:
-        print(f"✅ 网易云音乐: 运行中 (版本: {version})")
-        supported = get_supported_versions()
-        if version in supported:
-            print("  └── 版本支持: ✅")
-        else:
-            print("  └── 版本支持: ⚠️  可能需要更新地址偏移")
+
+    config = get_config()
+    source_type = config.get('source', 'type', default='lxmusic')
+    print(f"当前歌词源: {source_type}")
+
+    # 检查洛雪音乐
+    source = create_source(source_type)
+    if source.find_process():
+        print(f"✅ {source.name}: 运行中 (PID: {source.process_id})")
+        if source.version:
+            print(f"  └── 版本: {source.version}")
+        print("  └── 请确保已开启桌面歌词功能")
     else:
-        print("❌ 网易云音乐: 未运行")
-        print("   请确保已安装并运行网易云音乐，且开启了桌面歌词功能")
-    
-    print()
-    print("支持的网易云音乐版本:")
-    for v in get_supported_versions():
-        print(f"  - {v}")
-    
+        print(f"❌ {source.name}: 未运行")
+        print(f"   请确保已安装并运行{source.name}，且开启了桌面歌词功能")
+
     print()
     print("使用方法:")
-    print("  1. 打开网易云音乐")
+    print(f"  1. 打开{source.name}")
     print("  2. 播放任意歌曲")
-    print("  3. 开启桌面歌词功能")
+    print(f"  3. 开启{source.name}桌面歌词功能")
     print("  4. 运行本程序")
+    print()
+    print("切换歌词源:")
+    print("  编辑 ~/.halo_lrc_sync/config.json 中的 source.type")
 
 
 def main():

@@ -50,3 +50,6 @@ config.json
 
 # User directory
 .halo_lrc_sync/
+
+# Cloudmusic debug tools (feature branch only)
+tools/

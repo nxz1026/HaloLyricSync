@@ -20,6 +20,19 @@ class Config:
             "sync_offset_ms": 0,
             "max_chars_per_line": 20
         },
+        "source": {
+            "type": "lxmusic",
+            "lxmusic": {
+                "api_url": "",
+                "api_port": 23330,
+                "auto_detect_port": True,
+                "prefer_sse": True,
+                "http_api_token": ""
+            },
+            "cloudmusic": {
+                "test_absolute_address": None
+            }
+        },
         "hid": {
             "auto_detect": True,
             "device_keywords": ["halo", "pixel", "花再", "pixelbar"]
