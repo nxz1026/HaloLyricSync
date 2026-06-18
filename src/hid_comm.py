@@ -188,12 +188,22 @@ class HaloPixelCommunicator:
             print(f"    厂商: {device.manufacturer_string}")
             print(f"    固件版本: {device.release_number:04X}")
     
+    def _probe_write(self) -> bool:
+        """发送空文本测试 HID 写入是否可用"""
+        if self._simulated or not self.device:
+            return True
+        test_pkt = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00, 0x06, 0x00, 0x04]) + bytes(64 - 8)
+        try:
+            return self.device.write(test_pkt) >= 0
+        except Exception:
+            return False
+
     def connect(self, path: Optional[str] = None) -> bool:
         """
         连接到HALO设备
         
         Args:
-            path: 设备路径，如果为空则自动查找第一个HALO设备
+            path: 设备路径，如果为空则自动查找可写入的HALO设备
             
         Returns:
             是否连接成功
@@ -202,60 +212,64 @@ class HaloPixelCommunicator:
             if self.connected:
                 print("[HID] 已连接")
                 return True
-            
+
             if self._simulated:
                 self.device = "simulated"
                 self.connected = True
                 print("[HID] 模拟连接到设备")
                 return True
-            
-            # 查找设备
-            if not path:
-                halo_devices = self.find_halo_devices()
-                if not halo_devices:
-                    print("[HID] 未找到HALO PIXELBAR设备")
-                    return False
-                self.device_info = halo_devices[0]
-                path = self.device_info.path  # bytes 类型
-            else:
-                # 根据路径查找设备信息
-                # 统一为 bytes 再比较
+
+            # 收集要尝试的设备路径列表
+            candidates: List[HidDeviceInfo] = []
+            if path:
+                # 指定路径
                 if isinstance(path, str):
                     ref_path = path.encode('utf-8')
                 else:
                     ref_path = path
                 for device in self.list_devices():
                     if device.path == ref_path:
-                        self.device_info = device
+                        candidates.append(device)
                         break
-
-            # 打开设备
-            try:
-                self.device = hid.device()
-                # open_path 需要 bytes 类型的路径
-                if isinstance(path, str):
-                    open_path = path.encode('utf-8')
-                elif isinstance(path, bytes):
-                    open_path = path
-                else:
-                    open_path = str(path).encode('utf-8')
-                self.device.open_path(open_path)
-                
-                if not self.device:
-                    print(f"[HID] 无法打开设备: {path}")
+                if not candidates:
+                    print(f"[HID] 未找到指定路径的设备")
                     return False
-                
-                # 设置非阻塞模式
-                self.device.set_nonblocking(1)
-                
-                self.connected = True
-                device_name = self.device_info.name if self.device_info else "Unknown"
-                print(f"[HID] 已连接到: {device_name}")
-                return True
-                
-            except Exception as e:
-                print(f"[HID] 连接失败: {e}")
-                return False
+            else:
+                candidates = self.find_halo_devices()
+                if not candidates:
+                    print("[HID] 未找到HALO PIXELBAR设备")
+                    return False
+
+            # 逐个设备尝试连接+写入验证
+            last_error = ""
+            for device_info in candidates:
+                dev_path = device_info.path
+                try:
+                    dev = hid.device()
+                    dev.open_path(dev_path)
+                    dev.set_nonblocking(1)
+                    # 用 test write 验证是否是可写入的接口
+                    test_pkt = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00, 0x06, 0x00, 0x04]) + bytes(64 - 8)
+                    if dev.write(test_pkt) < 0:
+                        dev.close()
+                        last_error = f"{device_info.name} 写入测试失败"
+                        continue
+                    # 连接成功
+                    self.device = dev
+                    self.device_info = device_info
+                    self.connected = True
+                    print(f"[HID] 已连接到: {device_info.name}")
+                    return True
+                except Exception as e:
+                    last_error = str(e)
+                    try:
+                        dev.close()
+                    except Exception:
+                        pass
+                    continue
+
+            print(f"[HID] 连接失败: {last_error}")
+            return False
     
     def disconnect(self) -> None:
         """断开连接"""
@@ -290,11 +304,8 @@ class HaloPixelCommunicator:
         
         try:
             with self._lock:
-                # HID数据包第一个字节是报告ID,通常为0
-                report = bytes([0x00]) + packet
-                        
-                # 写入设备
-                result = self.device.write(report)
+                # 设备期望裸 64 字节包,不加报告 ID 前缀
+                result = self.device.write(packet)
                         
                 if result == -1:
                     print("[HID] 发送失败")
@@ -345,7 +356,7 @@ class HaloPixelCommunicator:
             是否发送成功
         """
         # 截断过长的文本
-        max_chars = self.config.get('lyrics', 'max_chars_per_line', fallback=20)
+        max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
         text = text[:max_chars]
         
         return self.send_text(text)

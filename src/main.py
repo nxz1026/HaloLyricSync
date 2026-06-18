@@ -51,8 +51,7 @@ class LyricSynchronizer:
         source_type = self.config.get('source', 'type', default='lxmusic')
         if source_type == 'lxmusic':
             return create_source('lxmusic',
-                                http_api_url=self.config.get('source', 'lxmusic', 'http_api_url', default='') or None,
-                                http_api_token=self.config.get('source', 'lxmusic', 'http_api_token', default='') or None)
+                                api_url=self.config.get('source', 'lxmusic', 'api_url', default='') or None)
         elif source_type == 'cloudmusic':
             test_addr = self.config.get('source', 'cloudmusic', 'test_absolute_address', default=None)
             return create_source('cloudmusic', test_absolute_address=test_addr)
@@ -203,7 +202,7 @@ class LyricSynchronizer:
         print(f"[Lyric] {text}")
         
         # 截断过长的文本
-        max_chars = self.config.get('lyrics', 'max_chars_per_line', fallback=20)
+        max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
         text = text[:max_chars]
         
         # 根据文本长度决定布局
@@ -313,6 +312,7 @@ def main():
     )
     parser.add_argument("--list-devices", action="store_true", help="列出可用的HID设备")
     parser.add_argument("--status", action="store_true", help="检查网易云音乐状态")
+    parser.add_argument("--send", type=str, metavar="TEXT", help="发送自定义文本到设备并退出")
     parser.add_argument("--port", type=str, help="指定设备路径")
     parser.add_argument("--config", type=str, help="配置文件路径")
     
@@ -324,6 +324,17 @@ def main():
     
     if args.status:
         check_status()
+        return
+    
+    if args.send:
+        from src.hid_comm import get_hid_communicator
+        hid = get_hid_communicator()
+        if not hid.connect():
+            print("[FAIL] HID 设备连接失败")
+            return
+        hid.send_text(args.send)
+        print(f"[OK] 已发送: {args.send}")
+        hid.disconnect()
         return
     
     # 初始化
