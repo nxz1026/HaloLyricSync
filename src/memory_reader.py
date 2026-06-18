@@ -1,12 +1,11 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-歌词内存读取器（兼容层）
+歌词源兼容层
 
 ⚠️ 本模块已被重构为 src.source 架构。本文件仅保留旧 API 兼容。
 
 默认源：洛雪音乐（LX Music）
-旧 API：CloudMusicMemoryReader 已重命名为 CloudMusicSource，请使用 src.source。
 
 参考项目：HaloPixelToolBox (https://github.com/XFEstudio/HaloPixelToolBox)
 """

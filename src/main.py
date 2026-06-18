@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 HALO PIXELBAR 歌词同步主程序
-直接从网易云音乐进程中读取歌词，无需API
+通过 LX Music 开放 API 实时读取歌词,经 HID 协议同步到音箱
 
 参考项目：
 - HaloPixelToolBox (https://github.com/XFEstudio/HaloPixelToolBox)
@@ -304,14 +304,14 @@ def main():
   python src/main.py --list-devices  # 列出HID设备
 
 前提条件:
-  1. 网易云音乐已安装并运行
-  2. 网易云音乐开启了桌面歌词功能
+  1. LX Music (洛雪音乐) 已安装并运行
+  2. LX Music 已开启开放 API (设置 -> 开放 API)
   3. 电脑已连接 HALO PIXELBAR 音箱
   4. 以管理员权限运行（Windows)
         """
     )
     parser.add_argument("--list-devices", action="store_true", help="列出可用的HID设备")
-    parser.add_argument("--status", action="store_true", help="检查网易云音乐状态")
+    parser.add_argument("--status", action="store_true", help="检查 LX Music 状态")
     parser.add_argument("--send", type=str, metavar="TEXT", help="发送自定义文本到设备并退出")
     parser.add_argument("--port", type=str, help="指定设备路径")
     parser.add_argument("--config", type=str, help="配置文件路径")

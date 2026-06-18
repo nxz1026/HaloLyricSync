@@ -2,7 +2,7 @@
 REM HALO PIXELBAR 歌词同步器 - Windows启动脚本
 
 echo ========================================
-echo HALO PIXELBAR 歌词同步器
+echo HALO PIXELBAR 歌词同步器 (HaloLyricSync)
 echo ========================================
 echo.
 
@@ -46,7 +46,7 @@ echo   run.bat --help        - 显示帮助信息
 echo   run.bat --list-devices - 列出HID设备
 echo.
 echo 示例:
-echo   run.bat --status       - 检查网易云音乐状态
+echo   run.bat --status       - 检查 LX Music 状态
 echo   run.bat --port COM3   - 指定设备路径启动
 echo.
 goto :end
