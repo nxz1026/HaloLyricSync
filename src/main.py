@@ -139,8 +139,8 @@ class LyricSynchronizer:
         Args:
             lyrics: 原始歌词文本
         """
-        # 检查是否包含时间戳（[mm:ss.xx] 格式）
-        if '[' in lyrics and ']' in lyrics:
+        # 检查是否包含 LRC 时间戳（[mm:ss.xx] 格式）
+        if self._looks_like_lrc(lyrics):
             try:
                 parser = parse_lrc(lyrics)
                 if len(parser) > 0:
@@ -149,9 +149,23 @@ class LyricSynchronizer:
                     return
             except Exception:
                 pass
-        
+
         # 直接显示原始歌词
         self._display_lyric(lyrics.strip(), 0, 1)
+
+    @staticmethod
+    def _looks_like_lrc(text: str) -> bool:
+        """
+        粗略判断文本是否为 LRC 格式（包含 [mm:ss.xx] 时间戳）
+
+        Args:
+            text: 待检测文本
+
+        Returns:
+            是否可能是 LRC 格式
+        """
+        import re
+        return bool(re.search(r'\[\d{1,2}:\d{1,2}[.:]\d{1,3}\]', text))
     
     def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1):
         """

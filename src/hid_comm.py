@@ -18,8 +18,8 @@ import threading
 from typing import Optional, List
 from dataclasses import dataclass
 
-from .config import get_config
-from .hid_packet_builder import HidPacketBuilder, TextLayout, UIModel
+from src.config import get_config
+from src.hid_packet_builder import HidPacketBuilder, TextLayout, UIModel
 
 
 # 尝试导入HID库
@@ -35,7 +35,7 @@ except ImportError:
 @dataclass
 class HidDeviceInfo:
     """HID设备信息"""
-    path: str
+    path: bytes  # HID 库原始路径（bytes），通过 path_str 获取可读字符串
     vendor_id: int
     product_id: int
     serial_number: str
@@ -47,6 +47,13 @@ class HidDeviceInfo:
     def name(self) -> str:
         """获取设备名称"""
         return self.product_string or "Unknown Device"
+
+    @property
+    def path_str(self) -> str:
+        """获取可读的路径字符串"""
+        if isinstance(self.path, bytes):
+            return self.path.decode('utf-8', errors='replace')
+        return str(self.path)
 
 
 class HidError(Exception):
@@ -104,7 +111,7 @@ class HaloPixelCommunicator:
         if not HAS_HIDAPI:
             # 模拟模式返回虚拟设备
             devices.append(HidDeviceInfo(
-                path="simulated",
+                path=b"simulated",
                 vendor_id=0x1234,
                 product_id=0x5678,
                 serial_number="SIMULATED",
@@ -119,8 +126,13 @@ class HaloPixelCommunicator:
             
             for dev in enumerated:
                 # hid.enumerate() 返回字典列表
+                # 保持路径为原始 bytes 类型，避免 decode/encode 来回转换丢失数据
+                raw_path = dev.get('path', b'')
+                if not isinstance(raw_path, bytes):
+                    raw_path = str(raw_path).encode('utf-8')
+
                 info = HidDeviceInfo(
-                    path=dev.get('path', b'').decode('utf-8') if isinstance(dev.get('path'), bytes) else str(dev.get('path', '')),
+                    path=raw_path,
                     vendor_id=dev.get('vendor_id', 0),
                     product_id=dev.get('product_id', 0),
                     serial_number=dev.get('serial_number', ''),
@@ -170,7 +182,7 @@ class HaloPixelCommunicator:
         
         for i, device in enumerate(devices, 1):
             print(f"\n[{i}] {device.name}")
-            print(f"    路径: {device.path}")
+            print(f"    路径: {device.path_str}")
             print(f"    VID:PID: {device.vendor_id:04X}:{device.product_id:04X}")
             print(f"    序列号: {device.serial_number}")
             print(f"    厂商: {device.manufacturer_string}")
@@ -203,19 +215,31 @@ class HaloPixelCommunicator:
                 if not halo_devices:
                     print("[HID] 未找到HALO PIXELBAR设备")
                     return False
-                path = halo_devices[0].path
                 self.device_info = halo_devices[0]
+                path = self.device_info.path  # bytes 类型
             else:
                 # 根据路径查找设备信息
+                # 统一为 bytes 再比较
+                if isinstance(path, str):
+                    ref_path = path.encode('utf-8')
+                else:
+                    ref_path = path
                 for device in self.list_devices():
-                    if device.path == path:
+                    if device.path == ref_path:
                         self.device_info = device
                         break
-            
+
             # 打开设备
             try:
                 self.device = hid.device()
-                self.device.open_path(path.encode('utf-8') if isinstance(path, str) else path)
+                # open_path 需要 bytes 类型的路径
+                if isinstance(path, str):
+                    open_path = path.encode('utf-8')
+                elif isinstance(path, bytes):
+                    open_path = path
+                else:
+                    open_path = str(path).encode('utf-8')
+                self.device.open_path(open_path)
                 
                 if not self.device:
                     print(f"[HID] 无法打开设备: {path}")

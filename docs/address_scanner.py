@@ -103,15 +103,53 @@ class MemoryScanner:
             return None
 
     def get_module_base(self, module_name: str) -> Optional[int]:
-        """获取模块基地址"""
-        for proc in psutil.process_iter(['pid', 'name', 'exe']):
-            try:
-                if proc.pid == self.process_id:
-                    for module in proc.memory_maps():
-                        if module_name.lower() in module.path.lower():
-                            return int(module.addr, 16)
-            except:
-                pass
+        """
+        通过 CreateToolhelp32Snapshot 获取模块加载基址
+
+        memory_maps() 返回的是内存映射区域（不含模块基址信息），
+        因此这里使用 Windows Tool Help API 来枚举进程模块。
+        """
+        import ctypes.wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        TH32CS_SNAPMODULE = 0x00000008
+        MAX_PATH = 260
+
+        class MODULEENTRY32(ctypes.Structure):
+            _fields_ = [
+                ('dwSize', ctypes.c_ulong),
+                ('th32ModuleID', ctypes.c_ulong),
+                ('th32ProcessID', ctypes.c_ulong),
+                ('GlblcntUsage', ctypes.c_ulong),
+                ('ProccntUsage', ctypes.c_ulong),
+                ('modBaseAddr', ctypes.POINTER(ctypes.c_byte)),
+                ('modBaseSize', ctypes.c_ulong),
+                ('hModule', ctypes.c_void_p),
+                ('szModule', ctypes.c_char * (MAX_PATH + 1)),
+                ('szExePath', ctypes.c_char * MAX_PATH),
+            ]
+
+        hSnapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, self.process_id)
+        if hSnapshot == -1:
+            return None
+
+        try:
+            me32 = MODULEENTRY32()
+            me32.dwSize = ctypes.sizeof(MODULEENTRY32)
+
+            if not kernel32.Module32First(hSnapshot, ctypes.byref(me32)):
+                return None
+
+            while True:
+                mod_name = me32.szModule.decode('utf-8', errors='ignore').lower()
+                if module_name.lower() in mod_name:
+                    return ctypes.cast(me32.modBaseAddr, ctypes.c_void_p).value
+
+                if not kernel32.Module32Next(hSnapshot, ctypes.byref(me32)):
+                    break
+        finally:
+            kernel32.CloseHandle(hSnapshot)
+
         return None
 
 
@@ -293,35 +331,49 @@ def main():
 
     version = "未知"
     try:
-        version = process.version()
-        if version:
-            major, minor, patch = version.split('.')[:3]
-            version = f"{major}.{minor}.{patch}"
-    except:
+        # 从 PE 文件读取版本号（psutil 没有 version() 方法）
+        exe_path = process.exe()
+        size = ctypes.windll.version.GetFileVersionInfoSizeW(exe_path, None)
+        if size > 0:
+            buf = ctypes.create_string_buffer(size)
+            if ctypes.windll.version.GetFileVersionInfoW(exe_path, 0, size, buf):
+                ptr = ctypes.c_void_p()
+                length = ctypes.c_uint()
+                if ctypes.windll.version.VerQueryValueW(buf, '\\', ctypes.byref(ptr), ctypes.byref(length)):
+                    class VS_FIXEDFILEINFO(ctypes.Structure):
+                        _fields_ = [
+                            ('dwSignature', ctypes.c_ulong),
+                            ('dwStrucVersion', ctypes.c_ulong),
+                            ('dwFileVersionMS', ctypes.c_ulong),
+                            ('dwFileVersionLS', ctypes.c_ulong),
+                            ('dwProductVersionMS', ctypes.c_ulong),
+                            ('dwProductVersionLS', ctypes.c_ulong),
+                            ('dwFileFlagsMask', ctypes.c_ulong),
+                            ('dwFileFlags', ctypes.c_ulong),
+                            ('dwFileOS', ctypes.c_ulong),
+                            ('dwFileType', ctypes.c_ulong),
+                            ('dwFileSubtype', ctypes.c_ulong),
+                            ('dwFileDateMS', ctypes.c_ulong),
+                            ('dwFileDateLS', ctypes.c_ulong),
+                        ]
+                    info = ctypes.cast(ptr, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+                    if info.dwSignature == 0xFEEF04BD:
+                        major = (info.dwFileVersionMS >> 16) & 0xFFFF
+                        minor = info.dwFileVersionMS & 0xFFFF
+                        patch = (info.dwFileVersionLS >> 16) & 0xFFFF
+                        version = f"{major}.{minor}.{patch}"
+    except Exception:
         pass
 
     try:
         dll_base = None
         try:
-            # 尝试使用 memory_maps grouped
-            for module in process.memory_maps(grouped=False):
-                if hasattr(module, 'path') and 'cloudmusic.dll' in module.path.lower():
-                    if hasattr(module, 'addr'):
-                        dll_base = int(module.addr, 16)
-                    elif hasattr(module, 'rss'):
-                        # 某些版本的 psutil 返回不同结构
-                        dll_base = int(getattr(module, 'addr', '0x1D00000'), 16)
-                    print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
-                    break
-        except:
-            pass
-        
-        if not dll_base:
-            # 备用方法：查找进程模块
-            import ctypes.wintypes
+            # 使用 CreateToolhelp32Snapshot 获取 cloudmusic.dll 基址
+            # 注意：不能直接用 MemoryScanner.get_module_base，因为此时 scanner 还未创建
+            kernel32 = ctypes.windll.kernel32
             TH32CS_SNAPMODULE = 0x00000008
             MAX_PATH = 260
-            
+
             class MODULEENTRY32(ctypes.Structure):
                 _fields_ = [
                     ('dwSize', ctypes.c_ulong),
@@ -333,25 +385,26 @@ def main():
                     ('modBaseSize', ctypes.c_ulong),
                     ('hModule', ctypes.c_void_p),
                     ('szModule', ctypes.c_char * (MAX_PATH + 1)),
-                    ('szExePath', ctypes.c_char * MAX_PATH)
+                    ('szExePath', ctypes.c_char * MAX_PATH),
                 ]
-            
-            hSnapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process.pid)
+
+            hSnapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process.pid)
             if hSnapshot != -1:
-                me32 = MODULEENTRY32()
-                me32.dwSize = ctypes.sizeof(MODULEENTRY32)
-                
-                if ctypes.windll.kernel32.Module32First(hSnapshot, ctypes.byref(me32)):
-                    while True:
-                        module_name = me32.szModule.decode('utf-8', errors='ignore').lower()
-                        if 'cloudmusic.dll' in module_name:
-                            dll_base = ctypes.cast(me32.modBaseAddr, ctypes.c_void_p).value
-                            print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
-                            break
-                        if not ctypes.windll.kernel32.Module32Next(hSnapshot, ctypes.byref(me32)):
-                            break
-                
-                ctypes.windll.kernel32.CloseHandle(hSnapshot)
+                try:
+                    me32 = MODULEENTRY32()
+                    me32.dwSize = ctypes.sizeof(MODULEENTRY32)
+
+                    if kernel32.Module32First(hSnapshot, ctypes.byref(me32)):
+                        while True:
+                            mod_name = me32.szModule.decode('utf-8', errors='ignore').lower()
+                            if 'cloudmusic.dll' in mod_name:
+                                dll_base = ctypes.cast(me32.modBaseAddr, ctypes.c_void_p).value
+                                print(f"[信息] cloudmusic.dll 基址: 0x{dll_base:08X}")
+                                break
+                            if not kernel32.Module32Next(hSnapshot, ctypes.byref(me32)):
+                                break
+                finally:
+                    kernel32.CloseHandle(hSnapshot)
         
         if not dll_base:
             print("[警告] 未找到 cloudmusic.dll，尝试使用默认基址")
