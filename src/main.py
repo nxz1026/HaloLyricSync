@@ -137,6 +137,8 @@ class LyricSynchronizer:
         # 用于 LRC 时间同步
         self._parsed_lrc: LyricsParser | None = None
         self._last_song_key: str = ""
+        # 切歌后, LX Music 会把"歌名-歌手"塞进 LRC 第 0 行; 需要 progress_ms >= 第 1 行 time_ms 才显示
+        self._post_transition_min_progress_ms: int = 0
         self._stop_event = threading.Event()
         # 切歌过渡
         self._song_transition = False
@@ -242,13 +244,24 @@ class LyricSynchronizer:
                             self._parsed_lrc = parse_lrc(lrc_text)
                             total = len(self._parsed_lrc.lines) if self._parsed_lrc else 0
                             print(f"[Sync] LRC 已加载: {total} 行")
+                            # 计算过渡期最小进度(跳过 LRC 第 0 行疑似"歌名-歌手"过渡文本)
+                            if self._parsed_lrc and len(self._parsed_lrc.lines) >= 2:
+                                self._post_transition_min_progress_ms = self._parsed_lrc.lines[1].time_ms
+                            else:
+                                self._post_transition_min_progress_ms = 0
                         except Exception:
                             self._parsed_lrc = None
-                    # 显示歌曲信息（配置开关）
+                            self._post_transition_min_progress_ms = 0
+                    # 切歌过渡(无论是否显示歌曲信息, 都启用过渡期屏蔽 LX Music 切歌头发的“歌名-歌手”过渡文本)
+                    transition_s = float(self.config.get('lyrics', 'song_info_duration_s', default=3))
                     if self.config.get('lyrics', 'display_song_info', default=True) and snapshot:
                         self._show_song_info(snapshot.song_name, snapshot.singer)
                     else:
-                        self._song_transition = False
+                        # 仅设置过渡标志, 不发歌名到 HID
+                        self._transition_start = time.monotonic()
+                        self._transition_duration = max(transition_s, 1.0)
+                        self._song_transition = True
+                        self.last_lyrics_text = ""
 
                 # 切歌过渡期：显示歌曲信息中,过期后由主循环退出
                 if self._song_transition:
@@ -258,7 +271,13 @@ class LyricSynchronizer:
                 else:
                     # 从 LRC 按进度取当前行
                     display_text = None
-                    if self._parsed_lrc and len(self._parsed_lrc) > 0 and progress_ms > 0:
+                    if (
+                        self._parsed_lrc
+                        and len(self._parsed_lrc) > 0
+                        and progress_ms > 0
+                        and progress_ms >= self._post_transition_min_progress_ms
+                        and not self._song_transition
+                    ):
                         current_line = self._parsed_lrc.get_lyric_at_time(progress_ms)
                         if current_line and current_line.text:
                             display_text = current_line.text
@@ -303,7 +322,8 @@ class LyricSynchronizer:
         if not song_name and not singer:
             return
         info = f"{song_name} - {singer}" if singer else song_name
-        duration = self.config.get('lyrics', 'song_info_duration_s', default=3)
+        # 过渡期最少 1.0 秒(避免 song_info_duration_s=0 导致过渡闪退,跳出后 LRC (0) 行仍可能是“歌手-歌名”)
+        duration = max(float(self.config.get('lyrics', 'song_info_duration_s', default=3)), 1.0)
         print(f"[Sync] 切换歌曲: {info}")
         self.hid.set_text_layout(TextLayout.CENTER)
         self.hid.send_text(f"{info}")

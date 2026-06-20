@@ -296,9 +296,12 @@ class LxMusicSource(LyricsSource):
         # 优先 API 返回的 lyricLineText
         text = (snap.lyric_line_text or '').strip()
         if text:
-            # 去除 LX Music 在歌曲头时返回的 "歌手 - 歌名" 格式
-            if snap.singer and text == f'{snap.singer} - {snap.song_name}':
-                return None
+            # 去除 LX Music 在歌曲头时返回的 "歌手 - 歌名" 格式（双向匹配,顺序不一定）
+            if snap.singer and snap.song_name:
+                expected1 = f'{snap.singer} - {snap.song_name}'
+                expected2 = f'{snap.song_name} - {snap.singer}'
+                if text == expected1 or text == expected2:
+                    return None
             return text
 
         # fallback:用 LRC + 进度自己算(LX Music LinePlayer 算法)
@@ -403,6 +406,10 @@ class LxMusicSource(LyricsSource):
         if song_key == self._current_song_key:
             return
         self._current_song_key = song_key
+
+        # 清空上一首歌的当前行歌词字段,避免显示残留
+        snap.lyric_line_text = ''
+        snap.lyric_line_all_text = ''
 
         # 拉 lyric-all(如果 /status 已经包含 lyric 字段就跳过)
         if not snap.lyric:
@@ -558,6 +565,11 @@ class LxMusicSource(LyricsSource):
             song_key = f'{snap.song_name}::{snap.singer}'
             if song_key != self._current_song_key and (snap.song_name or snap.singer):
                 self._current_song_key = song_key
+                # 清空 SSE 累积的旧歌词字段,避免显示上一首歌残留
+                self._sse_pending.pop('lyricLineText', None)
+                self._sse_pending.pop('lyricLineAllText', None)
+                snap.lyric_line_text = ''
+                snap.lyric_line_all_text = ''
                 if not snap.lyric:
                     lyric_dict = self._fetch_lyric_all()
                     if lyric_dict:
