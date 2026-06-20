@@ -59,7 +59,13 @@ from .lx_lyric_player import LxLyricParser, LxLyricPlayer, LxLyricLine
 # ---------------------------------------------------------------------------
 
 # LX Music 进程关键字(主进程可执行文件名)
-LX_PROCESS_KEYWORDS = ['lx-music-desktop', 'lx-music', 'lxmusic']
+# 涵盖:标准 Electron 包(lx-music-desktop)、便携版(lx-music)、
+# Microsoft Store 分发、自定义编译、以及含空格/连字符变体
+LX_PROCESS_KEYWORDS = [
+    'lx-music-desktop', 'lx-music', 'lxmusic',
+    'lx music',  # 含空格
+    'lx-music-desktop (',  # Windows 进程列表括号后缀
+]
 
 # LX Music 默认数据目录(Windows)
 LX_DEFAULT_DATA_PATHS = [

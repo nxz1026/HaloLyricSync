@@ -26,10 +26,14 @@ from src.hid_packet_builder import HidPacketBuilder, TextLayout, UIModel
 try:
     import hid
     HAS_HIDAPI = True
-except ImportError:
+except ImportError as _e:
     HAS_HIDAPI = False
-    print("[HID] hid库未安装,将使用模拟模式")
+    print(f"[HID] hid库未安装 ({_e}),将使用模拟模式")
     print("[HID] 安装命令: pip install hid")
+except Exception as _e:
+    HAS_HIDAPI = False
+    print(f"[HID] hid库导入异常 ({_e}),将使用模拟模式")
+    print("[HID] 安装命令如需重装: pip install --force-reinstall hid")
 
 
 @dataclass

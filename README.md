@@ -12,13 +12,23 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🔌 **LX Music 集成** | SSE 长连接 + HTTP 轮询 + SQLite 回退，四层策略保证歌词读取 |
-| 🎨 **多种布局** | 左对齐 / 居中 / 右对齐 / 拉伸 / 左右滚动 |
-| 🖥️ **UI 模式** | 时钟 / 游戏 / 工作 / 阅读 / 猫咪 / 狗狗 / 赛博 / 波浪 |
-| 📝 **自定义文本** | `--send TEXT` 发送任意文字到设备 |
-| 🎮 **播放控制** | LX Music API 控制播放 / 暂停 / 切歌 / 音量 |
+| LX Music 集成 | SSE 长连接 + HTTP 轮询 + SQLite 回退，四层策略保证歌词读取 |
+| 多种布局 | 左对齐 / 居中 / 右对齐 / 拉伸 / 左右滚动 |
+| UI 模式 | 时钟 / 游戏 / 工作 / 阅读 / 猫咪 / 狗狗 / 赛博 / 波浪 |
+| 自定义文本 | `--send TEXT` 发送任意文字到设备 |
+| 播放控制 | LX Music API 控制播放 / 暂停 / 切歌 / 音量 |
 
 ## 快速开始
+
+### 方法一：预编译 exe（推荐）
+
+1. **下载** — 从 [Releases](https://github.com/nxz1026/HaloLyricSync/releases) 下载 `HaloPixelBar_Windows.zip`
+2. **解压** — 右键 → 解压到当前文件夹
+3. **运行** — 右键 `HaloPixelBar.exe` → **以管理员身份运行**
+
+### 方法二：源码运行
+
+需要 Python 3.8+。
 
 ```bash
 pip install -r requirements.txt
@@ -34,10 +44,10 @@ python src/main.py
 ### 命令
 
 ```bash
-python src/main.py                  # 启动歌词同步
-python src/main.py --send "文本"    # 显示自定义文本
-python src/main.py --status         # 检查 LX Music 连接状态
-python src/main.py --list-devices   # 列出所有 HID 设备
+HaloPixelBar.exe --help              # 查看帮助
+HaloPixelBar.exe --send "文本"      # 显示自定义文本
+HaloPixelBar.exe --status            # 检查 LX Music 连接状态
+HaloPixelBar.exe --list-devices      # 列出所有 HID 设备
 ```
 
 ## 架构
@@ -71,7 +81,10 @@ HaloLyricSync/
 │       ├── factory.py         # 源工厂函数
 │       └── lx_lyric_player.py # LinePlayer 算法移植
 ├── requirements.txt
-└── run.bat
+├── run.bat
+├── HaloPixelBar_Windows.zip  # 预编译 exe 包
+└── dist/
+    └── HaloPixelBar.exe      # 单文件 exe (PyInstaller)
 ```
 
 ## 配置
@@ -118,7 +131,7 @@ HaloLyricSync/
 ## 依赖
 
 - [`psutil`](https://github.com/giampaolo/psutil) — 进程管理
-- [`hid`](https://github.com/libusb/hidapi) — HID 通信
+- [`hidapi`](https://github.com/libusb/hidapi) — HID 通信（编译扩展，静态链接）
 
 ## 参考
 

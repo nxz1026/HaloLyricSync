@@ -1,6 +1,12 @@
 @echo off
 REM HALO PIXELBAR 歌词同步器 - Windows启动脚本
 
+REM 切换到脚本所在目录，确保相对路径正确
+cd /d "%~dp0"
+
+REM 切换终端到 UTF-8 代码页，避免 Python 输出中文/emoji 时乱码或抛 UnicodeEncodeError
+chcp 65001 >nul
+
 echo ========================================
 echo HALO PIXELBAR 歌词同步器 (HaloLyricSync)
 echo ========================================
@@ -19,10 +25,23 @@ if not exist ".venv" (
     python -m venv .venv
 )
 
-call .venv\Scripts\activate.bat
+set "VENV_PYTHON=%~dp0.venv\Scripts\python.exe"
 
+REM 用 venv 的 pip 安装依赖（不依赖 activate.bat）
 echo [提示] 检查依赖...
-pip install -r requirements.txt -q
+"%VENV_PYTHON%" -m pip install -r "%~dp0requirements.txt"
+if errorlevel 1 (
+    echo [错误] 安装依赖失败，请检查网络或手动执行: pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+
+REM 验证关键包可导入
+"%VENV_PYTHON%" -c "import hid; import psutil" 2>nul
+if errorlevel 1 (
+    echo [警告] 依赖验证未通过，尝试重新安装 hidapi...
+    "%VENV_PYTHON%" -m pip install --force-reinstall hidapi
+)
 
 set "COMMAND=%1"
 
@@ -34,7 +53,7 @@ echo.
 echo [提示] 启动歌词同步器...
 echo [提示] 按 Ctrl+C 可随时停止
 echo.
-python src\main.py %*
+"%VENV_PYTHON%" src\main.py %*
 
 goto :end
 
@@ -52,7 +71,7 @@ echo.
 goto :end
 
 :list_devices
-python src\main.py --list-devices
+"%VENV_PYTHON%" src\main.py --list-devices
 goto :end
 
 :end

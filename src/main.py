@@ -14,6 +14,14 @@ import threading
 import signal
 from pathlib import Path
 
+# Windows GBK 终端下打印 Unicode（含 emoji/特殊设备名字符）会抛 UnicodeEncodeError。
+# 这里把 stdout/stderr 强制改回 UTF-8，并用 errors='replace' 兜底，避免 --list-devices / --status 崩溃。
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -72,6 +80,8 @@ class LyricSynchronizer:
         print(f"[Sync] 初始化歌词源: {self.reader.name}...")
         if not self.reader.initialize():
             print(f"[Sync] {self.reader.name} 未运行或不可用")
+            if hasattr(self.reader, 'last_error') and self.reader.last_error:
+                print(f"[Sync] 原因: {self.reader.last_error}")
             return
 
         # 连接HID设备
