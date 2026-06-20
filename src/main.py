@@ -35,7 +35,7 @@ from src.hid_packet_builder import TextLayout, UIModel
 class TrayApp:
     """系统托盘图标（Windows 通知区域）。
 
-    右键菜单: 显示窗口 / 退出。
+    无右键菜单（用户要求），仅显示图标表示后台运行。
     双击恢复控制台窗口。
     依赖: pip install \"halo-lyric-sync[tray]\"
     """
@@ -59,10 +59,8 @@ class TrayApp:
         draw = ImageDraw.Draw(img)
         draw.ellipse([8, 8, 56, 56], fill=(0, 120, 215, 255))
 
-        menu = pystray.Menu(
-            pystray.MenuItem("显示窗口", self._on_show_window, default=True),
-            pystray.MenuItem("退出", self._on_quit),
-        )
+        # 无右键菜单 —— 用一个空的 Menu 对象
+        menu = pystray.Menu()
 
         self._icon = pystray.Icon(
             "halo_lyric_sync",
@@ -71,24 +69,18 @@ class TrayApp:
             menu,
         )
 
-        self._icon.on_activate = self._on_show_window
+        # 双击恢复窗口
+        self._icon.on_activate = self._on_activate
 
-        print("[Tray] 托盘图标已启动")
+        print("[Tray] 托盘图标已启动（双击恢复窗口）")
+        # 隐藏控制台
         self._hide_console()
         self._icon.run()
 
-    def _on_show_window(self):
-        """显示/恢复控制台窗口。"""
+    def _on_activate(self):
+        """双击托盘图标 — 恢复控制台窗口。"""
         self._show_console()
         print("[Tray] 已恢复控制台窗口")
-
-    def _on_quit(self):
-        """完全退出（同步器 + 托盘）。"""
-        print("[Tray] 正在退出...")
-        self.sync.stop()
-        if self._icon:
-            self._icon.stop()
-            self._icon = None
 
     def stop(self):
         """退出托盘图标。"""
