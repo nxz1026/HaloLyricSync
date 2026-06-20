@@ -1,6 +1,6 @@
 # HALO PIXELBAR 歌词同步器
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue?logo=python)]()
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey?logo=windows)]()
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE.txt)
 [![Tests](https://img.shields.io/badge/Tests-28_✔️-success.svg)](tests/)

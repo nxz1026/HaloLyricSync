@@ -294,7 +294,7 @@ class HaloPixelCommunicator:
             if self.connected and self.device and not self._simulated:
                 try:
                     self.device.close()
-                except:
+                except Exception:
                     pass
                 self.device = None
                 self.connected = False

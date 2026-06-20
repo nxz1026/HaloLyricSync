@@ -27,9 +27,16 @@ sys.path.insert(0, str(project_root))
 
 from src.config import get_config
 from src.source import create_source
+from src.source.base import LyricsSource
 from src.lyrics_parser import parse_lrc, LyricsParser
 from src.hid_comm import get_hid_communicator, HaloPixelCommunicator
 from src.hid_packet_builder import TextLayout, UIModel
+
+# 同步循环采样间隔（秒）
+SYNC_SAMPLE_INTERVAL_S = 0.05
+
+# 无歌词超时切换到时钟 UI 的阈值（秒）
+NO_LYRICS_TIMEOUT_S = 30
 
 
 class TrayApp:
@@ -44,7 +51,7 @@ class TrayApp:
         self.sync = synchronizer
         self._icon = None
 
-    def run(self):
+    def run(self) -> None:
         """启动托盘图标（阻塞）。"""
         try:
             import pystray
@@ -77,7 +84,7 @@ class TrayApp:
         self._hide_console()
         self._icon.run()
 
-    def _on_activate(self):
+    def _on_activate(self) -> None:
         """双击托盘图标 — 恢复控制台窗口。"""
         self._show_console()
         print("[Tray] 已恢复控制台窗口")
@@ -149,7 +156,7 @@ class LyricSynchronizer:
         self._current_progress_index = 0
         self._current_progress_total = 0
 
-    def _create_source_from_config(self):
+    def _create_source_from_config(self) -> "LyricsSource":
         """根据配置创建歌词源"""
         source_type = self.config.get('source', 'type', default='lxmusic')
         if source_type == 'lxmusic':
@@ -174,10 +181,16 @@ class LyricSynchronizer:
 
         # 初始化歌词源
         print(f"[Sync] 初始化歌词源: {self.reader.name}...")
-        if not self.reader.initialize():
-            print(f"[Sync] {self.reader.name} 未运行或不可用")
-            if hasattr(self.reader, 'last_error') and self.reader.last_error:
-                print(f"[Sync] 原因: {self.reader.last_error}")
+        try:
+            if not self.reader.initialize():
+                print(f"[Sync] {self.reader.name} 未运行或不可用")
+                if hasattr(self.reader, 'last_error') and self.reader.last_error:
+                    print(f"[Sync] 原因: {self.reader.last_error}")
+                return
+        except Exception as e:
+            print(f"[Sync] 初始化歌词源异常: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
         # 连接HID设备
@@ -209,12 +222,27 @@ class LyricSynchronizer:
         print("\n[Sync] 收到中断信号")
         self.stop()
         sys.exit(0)
+
+    def _startup_test(self):
+        """启动测试 - 验证核心组件是否正常工作"""
+        print("[Debug] === 启动测试 ===")
+        try:
+            print(f"[Debug] 歌词源: {self.reader.name}")
+            print(f"[Debug] 歌词源就绪: {self.reader.is_ready()}")
+            print(f"[Debug] HID 连接状态: {self.hid.connected}")
+            print(f"[Debug] HID 模拟模式: {self.hid._simulated}")
+            print(f"[Debug] 配置路径: {self.config.config_path}")
+            print(f"[Debug] 歌词源初始化: {self.reader.initialize()}")
+            print("[Debug] === 测试完成 ===")
+        except Exception as e:
+            print(f"[Debug] 测试异常: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _sync_loop(self):
         """主同步循环"""
         show_startup = True
         no_lyrics_count = 0
-        SAMPLE_RATE_S = 0.05  # 50ms
         
         while self.running:
             try:
@@ -269,40 +297,33 @@ class LyricSynchronizer:
                 if self._song_transition:
                     if time.monotonic() - self._transition_start >= self._transition_duration:
                         self._song_transition = False
-                    display_text = None
-                else:
-                    display_text = None
+                display_text = None
 
-                    # 优先:通过歌词源读取(使用 LxLyricPlayer,与 LX Music 一致)
-                    raw_text = (self.reader.read_lyrics() or "").strip()
-                    if raw_text:
-                        display_text = raw_text
-                        # 从标准 LRC 解析器同步行号(用于进度显示)
-                        if self._parsed_lrc and len(self._parsed_lrc) > 0 and progress_ms > 0:
-                            matched = self._parsed_lrc.get_lyric_at_time(progress_ms)
-                            if matched:
-                                self._current_progress_index = matched.index
-                                self._current_progress_total = len(self._parsed_lrc.lines)
-                                if matched.index != self.last_lyric_index:
-                                    self.last_lyric_index = matched.index
-                                    print(f"[Lyric] ({matched.index}) {display_text}")
+                # 优先:通过歌词源读取(使用 LxLyricPlayer,与 LX Music 一致)
+                raw_text = (self.reader.read_lyrics() or "").strip()
+                if raw_text:
+                    display_text = raw_text
+                    # 从标准 LRC 解析器同步行号(用于进度显示)
+                    parsed_lrc = self._parsed_lrc
+                    if parsed_lrc and len(parsed_lrc) > 0 and progress_ms > 0:
+                        matched = parsed_lrc.get_lyric_at_time(progress_ms)
+                        if matched:
+                            self._current_progress_index = matched.index
+                            self._current_progress_total = len(parsed_lrc.lines)
+                            if matched.index != self.last_lyric_index:
+                                self.last_lyric_index = matched.index
+                                print(f"[Lyric] ({matched.index}) {display_text}")
 
-                    # 回退:直接 LRC 二分查找(标准 LyricsParser)
-                    if not display_text:
-                        if (
-                            self._parsed_lrc
-                            and len(self._parsed_lrc) > 0
-                            and progress_ms > 0
-                            and progress_ms >= self._post_transition_min_progress_ms
-                        ):
-                            current_line = self._parsed_lrc.get_lyric_at_time(progress_ms)
-                            if current_line and current_line.text:
-                                display_text = current_line.text
-                                self._current_progress_index = current_line.index
-                                self._current_progress_total = len(self._parsed_lrc.lines)
-                                if current_line.index != self.last_lyric_index:
-                                    self.last_lyric_index = current_line.index
-                                    print(f"[Lyric] ({current_line.index}) {current_line.text}")
+                # 回退:直接 LRC 二分查找(标准 LyricsParser)
+                if not display_text and parsed_lrc and len(parsed_lrc) > 0 and progress_ms > 0 and progress_ms >= self._post_transition_min_progress_ms:
+                        current_line = parsed_lrc.get_lyric_at_time(progress_ms)
+                        if current_line and current_line.text:
+                            display_text = current_line.text
+                            self._current_progress_index = current_line.index
+                            self._current_progress_total = len(parsed_lrc.lines)
+                            if current_line.index != self.last_lyric_index:
+                                self.last_lyric_index = current_line.index
+                                print(f"[Lyric] ({current_line.index}) {current_line.text}")
 
                 if display_text:
                     self._display_lyric(display_text)
@@ -315,12 +336,12 @@ class LyricSynchronizer:
                         show_startup = False
                 else:
                     no_lyrics_count += 1
-                    if no_lyrics_count > int(30 / SAMPLE_RATE_S):  # 30秒无歌词
+                    if no_lyrics_count > int(NO_LYRICS_TIMEOUT_S / SYNC_SAMPLE_INTERVAL_S):
                         self._switch_to_clock_ui()
                         no_lyrics_count = 0
 
                 # 用 Event.wait 替代 time.sleep，立即响应退出
-                if self._stop_event.wait(SAMPLE_RATE_S):
+                if self._stop_event.wait(SYNC_SAMPLE_INTERVAL_S):
                     return
                 
             except Exception as e:
@@ -345,7 +366,7 @@ class LyricSynchronizer:
         # 强制下次写入新歌词(清空去重缓存)
         self.last_lyrics_text = ""
 
-    def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1):
+    def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1) -> None:
         """
         显示歌词
 
@@ -394,7 +415,7 @@ class LyricSynchronizer:
         if not success:
             print("[Sync] 歌词发送失败")
     
-    def _switch_to_clock_ui(self):
+    def _switch_to_clock_ui(self) -> None:
         """切换到时钟UI模式"""
         if self.clock_mode:
             return
@@ -407,7 +428,7 @@ class LyricSynchronizer:
         except Exception as e:
             print(f"[Sync] 切换UI模式失败: {e}")
     
-    def _clear_display(self):
+    def _clear_display(self) -> None:
         """清空显示"""
         self.hid.clear_display()
         self.current_lyric = None
@@ -566,9 +587,16 @@ def main():
             synchronizer._stop_event.wait()
     except KeyboardInterrupt:
         print("\n[Main] 用户中断")
+    except SystemExit:
+        print("\n[Main] 系统退出")
+    except Exception as e:
+        print(f"\n[Main] 异常: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        input("按 Enter 键退出...")
     finally:
         synchronizer.stop()
-        if args.tray and 'tray_app' in locals():
+        if args.tray and tray_app is not None:
             tray_app.stop()
 
 
