@@ -198,7 +198,7 @@ HaloLyricSync/
 
 **歌词不翻页？** → 确认 LX Music 开放 API 已启用完整状态返回（需 `lyricLineText` + `progress`）
 
-**后台怎么恢复窗口？** → `HaloPixelBar.exe` 再次运行会提示已在运行
+**后台怎么恢复窗口？** → 任务管理器结束 `HaloPixelBar.exe` 进程后,以普通模式重新启动可显示控制台
 
 **乱码？** → 确认歌曲编码为 UTF-8
 

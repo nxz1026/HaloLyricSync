@@ -15,9 +15,6 @@ class Config:
     
     DEFAULT_CONFIG = {
         "lyrics": {
-            "scroll_speed": 1,
-            "display_duration": 3,
-            "scroll_duration": 0.5,
             "sync_offset_ms": 0,
             "max_chars_per_line": 20,
             "show_progress": True,
@@ -151,3 +148,9 @@ def get_config(config_path: str = None) -> Config:
     if _config_instance is None:
         _config_instance = Config(config_path)
     return _config_instance
+
+
+def _reset_config_instance() -> None:
+    """测试/调试用:重置全局 config 单例。下次 get_config() 会重新构造。"""
+    global _config_instance
+    _config_instance = None

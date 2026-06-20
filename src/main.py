@@ -59,6 +59,8 @@ class LyricSynchronizer:
         self._stop_event = threading.Event()
         # 切歌过渡
         self._song_transition = False
+        self._transition_start: float = 0.0
+        self._transition_duration: float = 0.0
         self._current_progress_index = 0
         self._current_progress_total = 0
 
@@ -150,6 +152,9 @@ class LyricSynchronizer:
                 # 切歌检测
                 if song_key and song_key != self._last_song_key:
                     self._last_song_key = song_key
+                    # 切歌后清空去重缓存,确保新歌词第一行写入
+                    self.last_lyrics_text = ""
+                    self.last_lyric_index = -1
                     # 重载 LRC
                     if lrc_text:
                         try:
@@ -161,12 +166,13 @@ class LyricSynchronizer:
                     # 显示歌曲信息（配置开关）
                     if self.config.get('lyrics', 'display_song_info', default=True) and snapshot:
                         self._show_song_info(snapshot.song_name, snapshot.singer)
-                        self._song_transition = True
                     else:
                         self._song_transition = False
 
-                # 切歌过渡期：显示歌曲信息中，跳过歌词更新
+                # 切歌过渡期：显示歌曲信息中,过期后由主循环退出
                 if self._song_transition:
+                    if time.monotonic() - self._transition_start >= self._transition_duration:
+                        self._song_transition = False
                     display_text = None
                 else:
                     # 从 LRC 按进度取当前行
@@ -212,7 +218,7 @@ class LyricSynchronizer:
                     return
     
     def _show_song_info(self, song_name: str, singer: str):
-        """切歌时显示歌曲信息 3 秒后恢复。"""
+        """切歌时显示歌曲信息,过渡期由主循环计时（非阻塞）。"""
         if not song_name and not singer:
             return
         info = f"{song_name} - {singer}" if singer else song_name
@@ -220,12 +226,12 @@ class LyricSynchronizer:
         print(f"[Sync] 切换歌曲: {info}")
         self.hid.set_text_layout(TextLayout.CENTER)
         self.hid.send_text(f"{info}")
-        # 显示期间跳过歌词更新
+        # 记录过渡期起点+长度,由主循环检查 elapsed;不阻塞 _sync_loop
+        self._transition_start = time.monotonic()
+        self._transition_duration = duration
         self._song_transition = True
-        # 用 Event.wait 实现可中断的等待
-        if self._stop_event.wait(duration):
-            return
-        self._song_transition = False
+        # 强制下次写入新歌词(清空去重缓存)
+        self.last_lyrics_text = ""
 
     def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1):
         """
@@ -248,6 +254,11 @@ class LyricSynchronizer:
         # 截断过长的文本
         max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
         text = text[:max_chars]
+
+        # 去重:同一文本不重复发送(进度停滞/暂停时避免刷屏)
+        if text == self.last_lyrics_text:
+            return
+        self.last_lyrics_text = text
         
         # 根据文本长度决定布局
         if len(text) > 15:
@@ -255,16 +266,18 @@ class LyricSynchronizer:
             if not self.scroll_mode:
                 self.hid.set_text_layout(TextLayout.SCROLL_RIGHT_TO_LEFT)
                 self.scroll_mode = True
-                time.sleep(0.3)
+                if self._stop_event.wait(0.3):
+                    return
         else:
             # 短文本使用居中模式
             if self.scroll_mode:
                 self.hid.set_text_layout(TextLayout.CENTER)
                 self.scroll_mode = False
-                time.sleep(0.1)
+                if self._stop_event.wait(0.1):
+                    return
         
         # 发送到HID设备
-        success = self.hid.send_lyric_line(text, line_index, total_lines)
+        success = self.hid.send_lyric_line(text)
         
         if not success:
             print("[Sync] 歌词发送失败")
@@ -364,6 +377,7 @@ def main():
   4. 以管理员权限运行（Windows)
         """
     )
+    parser.add_argument("--version", action="version", version="halo-lyric-sync 1.1.0")
     parser.add_argument("--list-devices", action="store_true", help="列出可用的HID设备")
     parser.add_argument("--status", action="store_true", help="检查 LX Music 状态")
     parser.add_argument("--send", type=str, metavar="TEXT", help="发送自定义文本到设备并退出")

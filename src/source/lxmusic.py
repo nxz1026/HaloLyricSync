@@ -169,7 +169,7 @@ class LxPlayerSnapshot:
             tlyric=str(_f('tlyric') or prior.tlyric),
             rlyric=str(_f('rlyric') or prior.rlyric),
             lxlyric=str(_f('lxlyric') or prior.lxlyric),
-            volume=int(_f('volume') or prior.volume) if 'volume' in data else prior.volume,
+            volume=int(data['volume']) if 'volume' in data else prior.volume,
             mute=bool(_f('mute', prior.mute)),
             updated_at=time.monotonic(),
         )
@@ -303,10 +303,7 @@ class LxMusicSource(LyricsSource):
 
         # fallback:用 LRC + 进度自己算(LX Music LinePlayer 算法)
         if snap.lyric and snap.progress_ms > 0:
-            computed = self._compute_current_line(
-                snap.lyric, snap.progress_ms,
-                extended=[snap.tlyric, snap.rlyric, snap.lxlyric],
-            )
+            computed = self._compute_current_line(snap.progress_ms)
             if computed:
                 return computed
         return None
@@ -440,17 +437,12 @@ class LxMusicSource(LyricsSource):
         except (urllib.error.URLError, ConnectionError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
             return None
 
-    def _compute_current_line(
-        self,
-        lrc_text: str,
-        progress_ms: int,
-        extended: Optional[List[str]] = None,
-    ) -> Optional[str]:
-        """根据进度用 LxLyricPlayer 算当前行"""
+    def _compute_current_line(self, progress_ms: int) -> Optional[str]:
+        """根据进度复用 self._player（由 _maybe_reload_lrc / _on_sse_event 切歌时设置）"""
+        if self._player is None:
+            return None
         try:
-            lines = self._parser.parse(lrc_text, extended_lyrics=extended)
-            player = LxLyricPlayer(lines=lines, offset_ms=self._parser.offset_ms)
-            return player.get_current_lyric(progress_ms)
+            return self._player.get_current_lyric(progress_ms)
         except Exception:
             return None
 
@@ -528,8 +520,9 @@ class LxMusicSource(LyricsSource):
                     continue
                 if not line:
                     # 空行 = 一个事件结束
-                    if current_event and current_data:
-                        self._on_sse_event(current_event, '\n'.join(current_data))
+                    # SSE 协议:无 event: 行时默认为 'message'
+                    if current_data:
+                        self._on_sse_event(current_event or 'message', '\n'.join(current_data))
                     current_event = ''
                     current_data = []
                     continue

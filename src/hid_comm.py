@@ -65,6 +65,16 @@ class HidError(Exception):
     pass
 
 
+def _display_width(s: str) -> int:
+    """计算字符串的显示宽度(CJK 字符占 2 列宽,其他占 1)。
+
+    HID 设备底层为 64 字节包,文本 UTF-8 编码后需放进去;
+    按显示宽度截断可避免中文 3 字节/字符造成的隐式超限。
+    """
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+
+
 class HaloPixelCommunicator:
     """HALO PIXELBAR HID通信器"""
     
@@ -250,6 +260,7 @@ class HaloPixelCommunicator:
             last_error = ""
             for device_info in candidates:
                 dev_path = device_info.path
+                dev = None
                 try:
                     dev = hid.device()
                     dev.open_path(dev_path)
@@ -268,7 +279,8 @@ class HaloPixelCommunicator:
                 except Exception as e:
                     last_error = str(e)
                     try:
-                        dev.close()
+                        if dev is not None:
+                            dev.close()
                     except Exception:
                         pass
                     continue
@@ -339,16 +351,17 @@ class HaloPixelCommunicator:
     def send_text(self, text: str, max_length: int = 50, color: Optional[TextColor] = None) -> bool:
         """
         发送文本到设备显示
-        
+
         Args:
             text: 要显示的文本
             max_length: 最大文本长度
-            
+
         Returns:
             是否发送成功
         """
-        # 截断过长的文本
-        text = text[:max_length]
+        # 按显示宽度截断(CJK 占 2 列宽),避免超 HID 64 字节
+        while _display_width(text) > max_length and text:
+            text = text[:-1]
 
         if color is None:
             color = self._resolve_color(self.config.get('hid', 'color', default='white'))
@@ -364,15 +377,12 @@ class HaloPixelCommunicator:
         
         return success
     
-    def send_lyric_line(self, text: str, line_index: int = 0, total_lines: int = 1,
-                        color: Optional[TextColor] = None) -> bool:
+    def send_lyric_line(self, text: str, color: Optional[TextColor] = None) -> bool:
         """
         发送歌词行到设备显示
 
         Args:
             text: 歌词文本
-            line_index: 行索引
-            total_lines: 总行数
             color: 文本颜色（可选，默认从配置读取）
 
         Returns:
@@ -380,9 +390,7 @@ class HaloPixelCommunicator:
         """
         # 截断过长的文本
         max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
-        text = text[:max_chars]
-
-        return self.send_text(text, color=color)
+        return self.send_text(text[:max_chars], color=color)
     
     def set_text_layout(self, layout: TextLayout) -> bool:
         """
