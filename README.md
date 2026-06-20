@@ -52,7 +52,8 @@ python src/main.py
 ```bash
 HaloPixelBar.exe --help                  # 查看帮助
 HaloPixelBar.exe                         # 启动同步器
-HaloPixelBar.exe --minimized             # 后台运行（隐藏窗口）
+HaloPixelBar.exe --tray                  # 系统托盘常驻（双击恢复窗口）
+HaloPixelBar.exe --minimized             # 纯后台运行（无托盘图标）
 HaloPixelBar.exe --send "文本"           # 显示自定义文本
 HaloPixelBar.exe --color red             # 指定歌词颜色
 HaloPixelBar.exe --status                # 检查 LX Music 连接状态
@@ -83,12 +84,24 @@ HaloPixelBar.exe --list-devices          # 列出所有 HID 设备
 ```
 自动扣减 `max_chars_per_line` 空间。配置 `lyrics.show_progress` 开关。
 
-### ⑥ 后台运行
+### ⑥ 系统托盘常驻
 
+```bash
+HaloPixelBar.exe --tray
+```
+隐藏控制台窗口，在系统通知区域显示蓝色圆点图标，表示后台运行中。**双击图标恢复窗口**。
+
+无需右键菜单，通过命令行 `--send` 或重新运行程序交互。
+
+需要安装可选依赖：
+```bash
+pip install "halo-lyric-sync[tray]"
+```
+
+纯后台模式（无托盘图标）：
 ```bash
 HaloPixelBar.exe --minimized
 ```
-隐藏控制台窗口，纯后台运行。通过命令行发送文本或后续 Webhook 控制。
 
 ### ⑧ 歌词颜色
 

@@ -32,6 +32,87 @@ from src.hid_comm import get_hid_communicator, HaloPixelCommunicator
 from src.hid_packet_builder import TextLayout, UIModel
 
 
+class TrayApp:
+    """系统托盘图标（Windows 通知区域）。
+
+    无右键菜单（用户要求），仅显示图标表示后台运行。
+    双击恢复控制台窗口。
+    依赖: pip install \"halo-lyric-sync[tray]\"
+    """
+
+    def __init__(self, synchronizer: "LyricSynchronizer"):
+        self.sync = synchronizer
+        self._icon = None
+
+    def run(self):
+        """启动托盘图标（阻塞）。"""
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+        except ImportError:
+            print("[Tray] pystray 未安装，跳过托盘图标")
+            print("[Tray] 安装: pip install \"halo-lyric-sync[tray]\"")
+            return
+
+        # 生成一个 64x64 的简单图标（蓝色圆点）
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([8, 8, 56, 56], fill=(0, 120, 215, 255))
+
+        # 无右键菜单 —— 用一个空的 Menu 对象
+        menu = pystray.Menu()
+
+        self._icon = pystray.Icon(
+            "halo_lyric_sync",
+            img,
+            "HALO PixelBar 歌词同步器\n后台运行中",
+            menu,
+        )
+
+        # 双击恢复窗口
+        self._icon.on_activate = self._on_activate
+
+        print("[Tray] 托盘图标已启动（双击恢复窗口）")
+        # 隐藏控制台
+        self._hide_console()
+        self._icon.run()
+
+    def _on_activate(self):
+        """双击托盘图标 — 恢复控制台窗口。"""
+        self._show_console()
+        print("[Tray] 已恢复控制台窗口")
+
+    def stop(self):
+        """退出托盘图标。"""
+        if self._icon:
+            self._icon.stop()
+            self._icon = None
+
+    @staticmethod
+    def _hide_console():
+        """隐藏控制台窗口。"""
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            hwnd = kernel32.GetConsoleWindow()
+            if hwnd:
+                kernel32.ShowWindow(hwnd, 0)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _show_console():
+        """恢复控制台窗口。"""
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            hwnd = kernel32.GetConsoleWindow()
+            if hwnd:
+                kernel32.ShowWindow(hwnd, 5)  # SW_SHOW
+        except Exception:
+            pass
+
+
 class LyricSynchronizer:
     """歌词同步器 - 使用可插拔歌词源 + HID通信"""
 
@@ -384,15 +465,20 @@ def main():
     parser.add_argument("--port", type=str, help="指定设备路径")
     parser.add_argument("--config", type=str, help="配置文件路径")
     parser.add_argument("--minimized", action="store_true",
-                        help="隐藏控制台窗口后台运行")
+                        help="后台运行（隐藏控制台窗口，无托盘图标）")
+    parser.add_argument("--tray", action="store_true",
+                        help="系统托盘常驻（隐藏窗口 + 托盘图标，双击恢复）")
     parser.add_argument("--color", type=str, default=None,
                         choices=["white", "red", "green", "blue", "yellow", "cyan", "magenta"],
                         help="歌词颜色（默认 white）")
     
     args = parser.parse_args()
 
-    # --minimized 启动时隐藏窗口
+    # --minimized 或 --tray 时隐藏窗口
     if args.minimized:
+        hide_console()
+    elif args.tray:
+        # 先隐藏窗口，后续由 TrayApp.run() 控制
         hide_console()
 
     print("=" * 60)
@@ -400,6 +486,8 @@ def main():
     print("(内存读取 + HID协议)")
     if args.minimized:
         print("(后台模式)")
+    if args.tray:
+        print("(托盘模式 — 双击图标恢复窗口)")
     print("=" * 60)
 
     if args.list_devices:
@@ -440,11 +528,20 @@ def main():
 
     try:
         synchronizer.start()
-        synchronizer._stop_event.wait()
+
+        if args.tray:
+            # 托盘模式：TrayApp.run() 阻塞，双击恢复窗口
+            tray_app = TrayApp(synchronizer)
+            tray_app.run()
+        else:
+            # 普通/后台模式：保持主线程运行
+            synchronizer._stop_event.wait()
     except KeyboardInterrupt:
         print("\n[Main] 用户中断")
     finally:
         synchronizer.stop()
+        if args.tray and 'tray_app' in locals():
+            tray_app.stop()
 
 
 if __name__ == "__main__":

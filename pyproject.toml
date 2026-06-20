@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+tray = ["pystray>=0.19", "Pillow>=9.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
