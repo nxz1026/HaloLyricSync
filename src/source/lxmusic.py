@@ -565,9 +565,13 @@ class LxMusicSource(LyricsSource):
             song_key = f'{snap.song_name}::{snap.singer}'
             if song_key != self._current_song_key and (snap.song_name or snap.singer):
                 self._current_song_key = song_key
-                # 清空 SSE 累积的旧歌词字段,避免显示上一首歌残留
+                # 清空 SSE 累积的旧歌词/进度/时长,避免用旧歌进度查新歌 LRC
                 self._sse_pending.pop('lyricLineText', None)
                 self._sse_pending.pop('lyricLineAllText', None)
+                self._sse_pending.pop('progress', None)
+                self._sse_pending.pop('duration', None)
+                snap.progress_ms = 0
+                snap.duration_ms = 0
                 snap.lyric_line_text = ''
                 snap.lyric_line_all_text = ''
                 if not snap.lyric:

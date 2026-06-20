@@ -94,6 +94,7 @@ class TrayApp:
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
+            kernel32.GetConsoleWindow.restype = ctypes.c_void_p
             hwnd = kernel32.GetConsoleWindow()
             if hwnd:
                 kernel32.ShowWindow(hwnd, 0)
@@ -106,6 +107,7 @@ class TrayApp:
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
+            kernel32.GetConsoleWindow.restype = ctypes.c_void_p
             hwnd = kernel32.GetConsoleWindow()
             if hwnd:
                 kernel32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -269,29 +271,38 @@ class LyricSynchronizer:
                         self._song_transition = False
                     display_text = None
                 else:
-                    # 从 LRC 按进度取当前行
                     display_text = None
-                    if (
-                        self._parsed_lrc
-                        and len(self._parsed_lrc) > 0
-                        and progress_ms > 0
-                        and progress_ms >= self._post_transition_min_progress_ms
-                        and not self._song_transition
-                    ):
-                        current_line = self._parsed_lrc.get_lyric_at_time(progress_ms)
-                        if current_line and current_line.text:
-                            display_text = current_line.text
-                            self._current_progress_index = current_line.index
-                            self._current_progress_total = len(self._parsed_lrc.lines)
-                            if current_line.index != self.last_lyric_index:
-                                self.last_lyric_index = current_line.index
-                                print(f"[Lyric] ({current_line.index}) {current_line.text}")
 
-                # fallback: lyricLineText（歌曲头或无 LRC 时）
-                if not display_text and not self._song_transition:
+                    # 优先:通过歌词源读取(使用 LxLyricPlayer,与 LX Music 一致)
                     raw_text = (self.reader.read_lyrics() or "").strip()
                     if raw_text:
                         display_text = raw_text
+                        # 从标准 LRC 解析器同步行号(用于进度显示)
+                        if self._parsed_lrc and len(self._parsed_lrc) > 0 and progress_ms > 0:
+                            matched = self._parsed_lrc.get_lyric_at_time(progress_ms)
+                            if matched:
+                                self._current_progress_index = matched.index
+                                self._current_progress_total = len(self._parsed_lrc.lines)
+                                if matched.index != self.last_lyric_index:
+                                    self.last_lyric_index = matched.index
+                                    print(f"[Lyric] ({matched.index}) {display_text}")
+
+                    # 回退:直接 LRC 二分查找(标准 LyricsParser)
+                    if not display_text:
+                        if (
+                            self._parsed_lrc
+                            and len(self._parsed_lrc) > 0
+                            and progress_ms > 0
+                            and progress_ms >= self._post_transition_min_progress_ms
+                        ):
+                            current_line = self._parsed_lrc.get_lyric_at_time(progress_ms)
+                            if current_line and current_line.text:
+                                display_text = current_line.text
+                                self._current_progress_index = current_line.index
+                                self._current_progress_total = len(self._parsed_lrc.lines)
+                                if current_line.index != self.last_lyric_index:
+                                    self.last_lyric_index = current_line.index
+                                    print(f"[Lyric] ({current_line.index}) {current_line.text}")
 
                 if display_text:
                     self._display_lyric(display_text)
@@ -494,11 +505,8 @@ def main():
     
     args = parser.parse_args()
 
-    # --minimized 或 --tray 时隐藏窗口
+    # --minimized 时直接隐藏窗口; --tray 由 TrayApp.run() 在检查依赖后自行隐藏
     if args.minimized:
-        hide_console()
-    elif args.tray:
-        # 先隐藏窗口，后续由 TrayApp.run() 控制
         hide_console()
 
     print("=" * 60)

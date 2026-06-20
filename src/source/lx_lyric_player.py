@@ -99,6 +99,7 @@ class LxLyricLine:
     """
     time: int                       # 时间戳(毫秒)
     text: str                       # 主歌词文本
+    index: int = -1                 # 排序后的行索引
     extended_lyrics: List[str] = field(default_factory=list)  # 翻译/罗马音
 
     def __repr__(self) -> str:
@@ -150,6 +151,8 @@ class LxLyricParser:
             self._parse_extended(lines_map, ext)
 
         self.lines = sorted(lines_map.values(), key=lambda x: x.time)
+        for i, ln in enumerate(self.lines):
+            ln.index = i
         return self.lines
 
     # --- 内部方法 ---
