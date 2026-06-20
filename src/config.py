@@ -4,6 +4,7 @@
 配置管理模块
 """
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,10 @@ class Config:
             "display_duration": 3,
             "scroll_duration": 0.5,
             "sync_offset_ms": 0,
-            "max_chars_per_line": 20
+            "max_chars_per_line": 20,
+            "show_progress": True,
+            "display_song_info": True,
+            "song_info_duration_s": 3
         },
         "source": {
             "type": "lxmusic",
@@ -35,7 +39,8 @@ class Config:
         },
         "hid": {
             "auto_detect": True,
-            "device_keywords": ["halo", "pixel", "花再", "pixelbar"]
+            "device_keywords": ["halo", "pixel", "花再", "pixelbar"],
+            "color": "white"
         },
         "app": {
             "log_level": "INFO",
@@ -56,7 +61,7 @@ class Config:
         else:
             self.config_path = Path.home() / ".halo_lrc_sync" / "config.json"
         
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         self.load()
     
     def load(self) -> None:

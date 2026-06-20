@@ -19,7 +19,7 @@ from typing import Optional, List
 from dataclasses import dataclass
 
 from src.config import get_config
-from src.hid_packet_builder import HidPacketBuilder, TextLayout, UIModel
+from src.hid_packet_builder import HidPacketBuilder, TextLayout, UIModel, TextColor
 
 
 # 尝试导入HID库
@@ -73,6 +73,9 @@ class HaloPixelCommunicator:
     
     # 设备最大输入/输出报告长度
     MAX_REPORT_LENGTH = 64
+
+    # 写入测试包（HID probe 用）
+    _WRITE_TEST_PKT = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00, 0x06, 0x00, 0x04]) + bytes(64 - 8)
     
     def __init__(self, config=None):
         """
@@ -196,9 +199,8 @@ class HaloPixelCommunicator:
         """发送空文本测试 HID 写入是否可用"""
         if self._simulated or not self.device:
             return True
-        test_pkt = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00, 0x06, 0x00, 0x04]) + bytes(64 - 8)
         try:
-            return self.device.write(test_pkt) >= 0
+            return self.device.write(self._WRITE_TEST_PKT) >= 0
         except Exception:
             return False
 
@@ -253,8 +255,7 @@ class HaloPixelCommunicator:
                     dev.open_path(dev_path)
                     dev.set_nonblocking(1)
                     # 用 test write 验证是否是可写入的接口
-                    test_pkt = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00, 0x06, 0x00, 0x04]) + bytes(64 - 8)
-                    if dev.write(test_pkt) < 0:
+                    if dev.write(self._WRITE_TEST_PKT) < 0:
                         dev.close()
                         last_error = f"{device_info.name} 写入测试失败"
                         continue
@@ -322,7 +323,20 @@ class HaloPixelCommunicator:
             self.connected = False
             return False
     
-    def send_text(self, text: str, max_length: int = 50) -> bool:
+    @staticmethod
+    def _resolve_color(color_spec) -> TextColor:
+        """将颜色配置（字符串/TextColor）解析为 TextColor。"""
+        if isinstance(color_spec, TextColor):
+            return color_spec
+        name_to_color = {
+            "white": TextColor.WHITE, "red": TextColor.RED,
+            "green": TextColor.GREEN, "blue": TextColor.BLUE,
+            "yellow": TextColor.YELLOW, "cyan": TextColor.CYAN,
+            "magenta": TextColor.MAGENTA,
+        }
+        return name_to_color.get(str(color_spec).lower().strip(), TextColor.WHITE)
+
+    def send_text(self, text: str, max_length: int = 50, color: Optional[TextColor] = None) -> bool:
         """
         发送文本到设备显示
         
@@ -335,9 +349,12 @@ class HaloPixelCommunicator:
         """
         # 截断过长的文本
         text = text[:max_length]
-        
+
+        if color is None:
+            color = self._resolve_color(self.config.get('hid', 'color', default='white'))
+
         # 构建文本数据包
-        packet = HidPacketBuilder.build_text(text)
+        packet = HidPacketBuilder.build_text(text, max_length=max_length, color=color)
         
         # 发送
         success = self._send_packet(packet)
@@ -347,23 +364,25 @@ class HaloPixelCommunicator:
         
         return success
     
-    def send_lyric_line(self, text: str, line_index: int = 0, total_lines: int = 1) -> bool:
+    def send_lyric_line(self, text: str, line_index: int = 0, total_lines: int = 1,
+                        color: Optional[TextColor] = None) -> bool:
         """
         发送歌词行到设备显示
-        
+
         Args:
             text: 歌词文本
             line_index: 行索引
             total_lines: 总行数
-            
+            color: 文本颜色（可选，默认从配置读取）
+
         Returns:
             是否发送成功
         """
         # 截断过长的文本
         max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
         text = text[:max_chars]
-        
-        return self.send_text(text)
+
+        return self.send_text(text, color=color)
     
     def set_text_layout(self, layout: TextLayout) -> bool:
         """
@@ -481,42 +500,3 @@ def get_hid_communicator() -> HaloPixelCommunicator:
 def get_usb_communicator() -> HaloPixelCommunicator:
     """获取USB通信器单例（向后兼容）"""
     return get_hid_communicator()
-
-
-if __name__ == "__main__":
-    # 测试代码
-    print("=" * 60)
-    print("HALO PIXELBAR HID通信测试")
-    print("=" * 60)
-    
-    # 列出所有设备
-    HaloPixelCommunicator.print_all_devices()
-    
-    # 尝试连接
-    communicator = HaloPixelCommunicator()
-    
-    print("\n" + "=" * 60)
-    print("尝试连接到HALO设备...")
-    print("=" * 60)
-    
-    if communicator.connect():
-        print("\n[成功] 已连接到设备")
-        
-        # 测试发送
-        print("\n测试发送文本:")
-        communicator.send_text("Hello from Python!")
-        
-        print("\n测试布局:")
-        communicator.set_text_layout(TextLayout.CENTER)
-        
-        print("\n测试UI模式:")
-        communicator.set_ui_mode(UIModel.CLOCK)
-        
-        # 断开连接
-        communicator.disconnect()
-    else:
-        print("\n[失败] 无法连接到设备")
-        print("提示：")
-        print("1. 请确保设备已连接")
-        print("2. 可能需要管理员权限运行")
-        print("3. 尝试: 以管理员身份运行命令提示符")

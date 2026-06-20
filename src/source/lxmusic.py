@@ -134,6 +134,46 @@ class LxPlayerSnapshot:
     def has_lyric(self) -> bool:
         return bool(self.lyric_line_text and self.lyric_line_text.strip())
 
+    @classmethod
+    def from_api_dict(cls, data: dict, prior: "LxPlayerSnapshot | None" = None) -> "LxPlayerSnapshot":
+        """从 LX Music API 返回的 dict 构造快照。缺失字段从 prior 继承。"""
+        state_raw = data.get('status', '')
+        state = str(state_raw or '').strip()
+        is_playing = state in LX_PLAYING_STATES
+        prior = prior or cls()
+
+        def _f(key: str, default=None):
+            return data.get(key) if key in data else default
+
+        def _int_ms(key: str) -> int:
+            if key not in data:
+                return prior.progress_ms if key == 'progress' else prior.duration_ms
+            v = data.get(key)
+            try:
+                return int(float(v or 0) * 1000)
+            except (TypeError, ValueError):
+                return prior.progress_ms if key == 'progress' else prior.duration_ms
+
+        return cls(
+            is_playing=is_playing if 'status' in data else prior.is_playing,
+            state=state or prior.state,
+            song_name=str(_f('name') or prior.song_name),
+            singer=str(_f('singer') or prior.singer),
+            album=str(_f('albumName') or prior.album),
+            lyric_line_text=str(_f('lyricLineText') or prior.lyric_line_text),
+            lyric_line_all_text=str(_f('lyricLineAllText') or prior.lyric_line_all_text),
+            progress_ms=_int_ms('progress'),
+            duration_ms=_int_ms('duration'),
+            playback_rate=float(_f('playbackRate') or prior.playback_rate) if 'playbackRate' in data else prior.playback_rate,
+            lyric=str(_f('lyric') or prior.lyric),
+            tlyric=str(_f('tlyric') or prior.tlyric),
+            rlyric=str(_f('rlyric') or prior.rlyric),
+            lxlyric=str(_f('lxlyric') or prior.lxlyric),
+            volume=int(_f('volume') or prior.volume) if 'volume' in data else prior.volume,
+            mute=bool(_f('mute', prior.mute)),
+            updated_at=time.monotonic(),
+        )
+
 
 # ---------------------------------------------------------------------------
 # 主类
@@ -358,40 +398,7 @@ class LxMusicSource(LyricsSource):
 
     def _parse_status_dict(self, data: Dict[str, Any]) -> LxPlayerSnapshot:
         """把 /status 返回的 JSON 转成 LxPlayerSnapshot"""
-        state_raw = data.get('status', '')
-        state = str(state_raw or '').strip()
-        is_playing = state in LX_PLAYING_STATES
-
-        # progress / duration 在 LX Music 中是**秒**(浮点),转毫秒
-        try:
-            progress_ms = int(float(data.get('progress', 0) or 0) * 1000)
-        except (TypeError, ValueError):
-            progress_ms = 0
-        try:
-            duration_ms = int(float(data.get('duration', 0) or 0) * 1000)
-        except (TypeError, ValueError):
-            duration_ms = 0
-
-        snap = LxPlayerSnapshot(
-            is_playing=is_playing,
-            state=state,
-            song_name=str(data.get('name', '') or ''),
-            singer=str(data.get('singer', '') or ''),
-            album=str(data.get('albumName', '') or ''),
-            lyric_line_text=str(data.get('lyricLineText', '') or ''),
-            lyric_line_all_text=str(data.get('lyricLineAllText', '') or ''),
-            progress_ms=progress_ms,
-            duration_ms=duration_ms,
-            playback_rate=float(data.get('playbackRate', 1.0) or 1.0),
-            lyric=str(data.get('lyric', '') or ''),
-            tlyric=str(data.get('tlyric', '') or ''),
-            rlyric=str(data.get('rlyric', '') or ''),
-            lxlyric=str(data.get('lxlyric', '') or ''),
-            volume=int(data.get('volume', 0) or 0),
-            mute=bool(data.get('mute', False)),
-            updated_at=time.monotonic(),
-        )
-        return snap
+        return LxPlayerSnapshot.from_api_dict(data, prior=self._snapshot)
 
     def _maybe_reload_lrc(self, snap: LxPlayerSnapshot) -> None:
         """切歌时重新加载完整 LRC,刷新 LxLyricPlayer"""
@@ -537,12 +544,9 @@ class LxMusicSource(LyricsSource):
     def _on_sse_event(self, event: str, data: str) -> None:
         """
         处理单个 SSE 事件。
-        LX Music SSE 是逐字段推送的(每个字段一个 event),
-        所以每收到一个事件都要合并到 pending,并更新 snapshot。
-
-        当 name/singer 变更时(切歌),触发 LRC 重载。
+        LX Music SSE 是逐字段推送的，每收到一个事件合并到 pending 并更新 snapshot。
+        切歌时触发 LRC 重载。
         """
-        # LX Music SSE 中 data 是 JSON 字符串
         try:
             value = json.loads(data)
         except (ValueError, TypeError):
@@ -552,67 +556,16 @@ class LxMusicSource(LyricsSource):
                 self._sse_pending = {}
             self._sse_pending[event] = value
 
-            # 构造一次 snapshot(使用上一轮快照填充未到达的字段)
-            pending = dict(self._sse_pending)
-            prior = self._snapshot
-            merged: Dict[str, Any] = {}
-            # 合并顺序:上次快照 → 本轮 pending
-            for key in (
-                'status', 'name', 'singer', 'albumName',
-                'duration', 'progress', 'playbackRate', 'picUrl',
-                'lyricLineText', 'lyricLineAllText',
-                'lyric', 'tlyric', 'rlyric', 'lxlyric',
-                'collect', 'volume', 'mute',
-            ):
-                if key in pending:
-                    merged[key] = pending[key]
-                elif key in {
-                    'status': prior.state,
-                    'name': prior.song_name,
-                    'singer': prior.singer,
-                    'albumName': prior.album,
-                    'progress': prior.progress_ms / 1000.0,
-                    'duration': prior.duration_ms / 1000.0,
-                    'playbackRate': prior.playback_rate,
-                    'lyricLineText': prior.lyric_line_text,
-                    'lyricLineAllText': prior.lyric_line_all_text,
-                    'lyric': prior.lyric,
-                    'tlyric': prior.tlyric,
-                    'rlyric': prior.rlyric,
-                    'lxlyric': prior.lxlyric,
-                    'volume': prior.volume,
-                    'mute': prior.mute,
-                }:
-                    merged[key] = prior.__dict__.get({
-                        'status': 'state',
-                        'name': 'song_name',
-                        'singer': 'singer',
-                        'albumName': 'album',
-                        'progress': 'progress_ms',
-                        'duration': 'duration_ms',
-                        'playbackRate': 'playback_rate',
-                        'lyricLineText': 'lyric_line_text',
-                        'lyricLineAllText': 'lyric_line_all_text',
-                        'lyric': 'lyric',
-                        'tlyric': 'tlyric',
-                        'rlyric': 'rlyric',
-                        'lxlyric': 'lxlyric',
-                        'volume': 'volume',
-                        'mute': 'mute',
-                    }[key])
-
-            snap = self._parse_status_dict(merged)
+            # 用 from_api_dict 合并：pending dict + 上次 snapshot 兜底
+            snap = LxPlayerSnapshot.from_api_dict(self._sse_pending, prior=self._snapshot)
             self._snapshot = snap
             self._last_error = ''
 
-            # 切歌检测:name 或 singer 变化 → 重载 LRC
+            # 切歌检测
             song_key = f'{snap.song_name}::{snap.singer}'
             if song_key != self._current_song_key and (snap.song_name or snap.singer):
                 self._current_song_key = song_key
-                # 不在锁内重载(避免阻塞其他事件) — 但当前必须同步读 /lyric-all
-                # 简单处理:后续 read_lyrics 调用时检测到 _player 为 None 会重载
                 if not snap.lyric:
-                    # 后台线程里同步拉一次 lyric-all
                     lyric_dict = self._fetch_lyric_all()
                     if lyric_dict:
                         snap.lyric = lyric_dict.get('lyric') or ''

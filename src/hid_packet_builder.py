@@ -17,6 +17,17 @@ from enum import Enum
 from typing import List
 
 
+class TextColor(Enum):
+    """文本颜色枚举（对应包头第5字节）"""
+    WHITE = 0
+    RED = 1
+    GREEN = 2
+    BLUE = 3
+    YELLOW = 4
+    CYAN = 5
+    MAGENTA = 6
+
+
 class TextLayout(Enum):
     """文本布局枚举"""
     LEFT = "left"
@@ -46,13 +57,19 @@ class HidPacketBuilder:
     # 固定包长度
     PACKET_LENGTH = 64
     
-    # 文本包头
-    TEXT_HEADER = bytes([0x2E, 0xAA, 0xEC, 0xE8, 0x00])
-    
-    # 布局包头
+    # 布局包头 (13字节)
+    # [0x2E, 0xAA, 0xEC, 0xEF] - 固定魔数
+    # [0x00]                       - 保留
+    # [0x09]                       - 包体长度
+    # [0x01]                       - 命令类型: 布局
+    # [0xF0, 0xB4, 0xC8]          - 未知/固定
+    # [0x00]                       - 保留
+    # [0x02]                       - 子命令
+    # [0x00]                       - 保留
     LAYOUT_HEADER = bytes([0x2E, 0xAA, 0xEC, 0xEF, 0x00, 0x09, 0x01, 0xF0, 0xB4, 0xC8, 0x00, 0x02, 0x00])
     
-    # 布局字节映射
+    # 布局字节 (4字节): [模式ID, 0xFF, 校验相关, 0x00]
+    # 模式ID: 0x00=左对齐/左滚, 0x01=居中/右滚, 0x02=右对齐, 0x03=拉伸
     LAYOUT_BYTES = {
         TextLayout.LEFT: bytes([0x00, 0xFF, 0xFC, 0x00]),
         TextLayout.CENTER: bytes([0x01, 0xFF, 0xFD, 0x00]),
@@ -99,21 +116,22 @@ class HidPacketBuilder:
         return acc % 256
     
     @staticmethod
-    def build_text(text: str, max_length: int = 50) -> bytes:
+    def build_text(text: str, max_length: int = 50, color: TextColor = TextColor.WHITE) -> bytes:
         """
         构建文本数据包
-        
+
         格式：
-        - 包头: 0x2E, 0xAA, 0xEC, 0xE8, 0x00 (5字节)
+        - 包头: 0x2E, 0xAA, 0xEC, 0xE8, color (5字节, 最后1字节=颜色)
         - 总长度: 2字节 (little-endian)
         - 文本长度: 1字节
         - 文本内容: UTF-8编码
         - 校验和: 1字节
-        
+
         Args:
             text: 文本内容
             max_length: 最大文本长度
-            
+            color: 文本颜色，默认白色
+
         Returns:
             64字节HID数据包
         """
@@ -131,8 +149,9 @@ class HidPacketBuilder:
         # 构建数据包
         packet = bytearray()
         
-        # 1. 包头
-        packet.extend(HidPacketBuilder.TEXT_HEADER)
+        # 1. 包头（含颜色字节）
+        color_byte = color.value if isinstance(color, TextColor) else 0
+        packet.extend(bytes([0x2E, 0xAA, 0xEC, 0xE8, color_byte]))
         
         # 2. 总长度 (2字节, little-endian)
         packet.extend(struct.pack('<H', total_len))
@@ -246,37 +265,3 @@ def build_layout_packet(layout: TextLayout) -> bytes:
 def build_ui_packet(model: UIModel) -> bytes:
     """便捷函数：构建UI模式数据包"""
     return HidPacketBuilder.build_ui_model(model)
-
-
-if __name__ == "__main__":
-    # 测试代码
-    print("=" * 60)
-    print("HID协议包构建器测试")
-    print("=" * 60)
-    
-    # 测试文本包
-    text_packet = build_text_packet("Hello World!")
-    print(f"\n文本包示例 (Hello World!):")
-    print(f"  长度: {len(text_packet)} 字节")
-    print(f"  十六进制: {HidPacketBuilder.to_hex(text_packet)}")
-    
-    # 测试布局包
-    print(f"\n布局包示例:")
-    for layout in TextLayout:
-        packet = build_layout_packet(layout)
-        print(f"  {layout.name}: {HidPacketBuilder.to_hex(packet)}")
-    
-    # 测试UI模式包
-    print(f"\nUI模式包示例:")
-    for model in UIModel:
-        packet = build_ui_packet(model)
-        print(f"  {model.name}: {HidPacketBuilder.to_hex(packet)}")
-    
-    # 测试校验和
-    print(f"\n校验和测试:")
-    test_text = "测试歌词"
-    test_bytes = test_text.encode('utf-8')
-    checksum_val = HidPacketBuilder.checksum(test_bytes)
-    print(f"  文本: {test_text}")
-    print(f"  字节: {test_bytes.hex()}")
-    print(f"  校验和: {checksum_val} (0x{checksum_val:02X})")

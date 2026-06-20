@@ -20,6 +20,12 @@ wheels/
 .installed.cfg
 *.egg
 
+# Binary / compiled artifacts (releases only)
+*.exe
+*.zip
+*.dmg
+*.AppImage
+
 # Virtual Environment
 .venv/
 venv/

@@ -27,7 +27,7 @@ sys.path.insert(0, str(project_root))
 
 from src.config import get_config
 from src.source import create_source
-from src.lyrics_parser import parse_lrc
+from src.lyrics_parser import parse_lrc, LyricsParser
 from src.hid_comm import get_hid_communicator, HaloPixelCommunicator
 from src.hid_packet_builder import TextLayout, UIModel
 
@@ -53,6 +53,14 @@ class LyricSynchronizer:
         self.last_lyrics_text = ""
         self.scroll_mode = False
         self.clock_mode = False
+        # 用于 LRC 时间同步
+        self._parsed_lrc: LyricsParser | None = None
+        self._last_song_key: str = ""
+        self._stop_event = threading.Event()
+        # 切歌过渡
+        self._song_transition = False
+        self._current_progress_index = 0
+        self._current_progress_total = 0
 
     def _create_source_from_config(self):
         """根据配置创建歌词源"""
@@ -74,6 +82,7 @@ class LyricSynchronizer:
             return
 
         self.running = True
+        self._stop_event.clear()
         print("[Sync] 开始歌词同步...")
 
         # 初始化歌词源
@@ -100,6 +109,7 @@ class LyricSynchronizer:
         """停止同步器"""
         print("[Sync] 正在停止...")
         self.running = False
+        self._stop_event.set()
         # 关闭歌词源(停止 SSE 线程等)
         if hasattr(self.reader, 'shutdown'):
             self.reader.shutdown()
@@ -117,100 +127,124 @@ class LyricSynchronizer:
         """主同步循环"""
         show_startup = True
         no_lyrics_count = 0
+        SAMPLE_RATE_S = 0.05  # 50ms
         
         while self.running:
             try:
                 # 检查播放器是否还在运行
                 if not self.reader.is_ready():
                     print(f"[Sync] {self.reader.name} 已关闭，等待重新启动...")
-                    time.sleep(2)
+                    if self._stop_event.wait(2):
+                        return
                     if self.reader.initialize():
                         print(f"[Sync] {self.reader.name} 已重新连接")
                         show_startup = True
                     continue
 
-                # 读取歌词
-                lyrics = self.reader.read_lyrics()
+                # 读全量快照（含 LRC 全文 + 进度）
+                snapshot = self.reader.get_full_snapshot() if hasattr(self.reader, 'get_full_snapshot') else None
+                lrc_text = snapshot.lyric if snapshot else None
+                progress_ms = snapshot.progress_ms if snapshot else 0
+                song_key = f"{snapshot.song_name}::{snapshot.singer}" if snapshot else ""
 
-                if lyrics and lyrics != self.last_lyrics_text:
-                    self.last_lyrics_text = lyrics
+                # 切歌检测
+                if song_key and song_key != self._last_song_key:
+                    self._last_song_key = song_key
+                    # 重载 LRC
+                    if lrc_text:
+                        try:
+                            self._parsed_lrc = parse_lrc(lrc_text)
+                            total = len(self._parsed_lrc.lines) if self._parsed_lrc else 0
+                            print(f"[Sync] LRC 已加载: {total} 行")
+                        except Exception:
+                            self._parsed_lrc = None
+                    # 显示歌曲信息（配置开关）
+                    if self.config.get('lyrics', 'display_song_info', default=True) and snapshot:
+                        self._show_song_info(snapshot.song_name, snapshot.singer)
+                        self._song_transition = True
+                    else:
+                        self._song_transition = False
+
+                # 切歌过渡期：显示歌曲信息中，跳过歌词更新
+                if self._song_transition:
+                    display_text = None
+                else:
+                    # 从 LRC 按进度取当前行
+                    display_text = None
+                    if self._parsed_lrc and len(self._parsed_lrc) > 0 and progress_ms > 0:
+                        current_line = self._parsed_lrc.get_lyric_at_time(progress_ms)
+                        if current_line and current_line.text:
+                            display_text = current_line.text
+                            self._current_progress_index = current_line.index
+                            self._current_progress_total = len(self._parsed_lrc.lines)
+                            if current_line.index != self.last_lyric_index:
+                                self.last_lyric_index = current_line.index
+                                print(f"[Lyric] ({current_line.index}) {current_line.text}")
+
+                # fallback: lyricLineText（歌曲头或无 LRC 时）
+                if not display_text and not self._song_transition:
+                    raw_text = (self.reader.read_lyrics() or "").strip()
+                    if raw_text:
+                        display_text = raw_text
+
+                if display_text:
+                    self._display_lyric(display_text)
                     no_lyrics_count = 0
-
-                    if self.clock_mode:
-                        self.clock_mode = False
-                        self.scroll_mode = False
-                        print("[Sync] 恢复歌词显示模式")
-
                     if show_startup:
                         print(f"\n{'='*60}")
                         print(f"[Sync] {self.reader.name} 歌词同步已启动!")
                         print(f"[Sync] 版本: {self.reader.version}")
                         print(f"{'='*60}\n")
                         show_startup = False
-
-                    self._process_lyrics(lyrics)
                 else:
                     no_lyrics_count += 1
-                    # 连续30秒无歌词变化，切换到时钟UI
-                    if no_lyrics_count > 600:  # 30秒 * 20次
+                    if no_lyrics_count > int(30 / SAMPLE_RATE_S):  # 30秒无歌词
                         self._switch_to_clock_ui()
                         no_lyrics_count = 0
-                
-                time.sleep(0.05)  # 50ms刷新间隔
+
+                # 用 Event.wait 替代 time.sleep，立即响应退出
+                if self._stop_event.wait(SAMPLE_RATE_S):
+                    return
                 
             except Exception as e:
                 print(f"[Sync] 同步错误: {e}")
-                time.sleep(1)
-    
-    def _process_lyrics(self, lyrics: str):
-        """
-        处理歌词文本
-        
-        Args:
-            lyrics: 原始歌词文本
-        """
-        # 检查是否包含 LRC 时间戳（[mm:ss.xx] 格式）
-        if self._looks_like_lrc(lyrics):
-            try:
-                parser = parse_lrc(lyrics)
-                if len(parser) > 0:
-                    current_line = parser[0]
-                    self._display_lyric(current_line.text, current_line.index, len(parser))
+                if self._stop_event.wait(1):
                     return
-            except Exception:
-                pass
-
-        # 直接显示原始歌词
-        self._display_lyric(lyrics.strip(), 0, 1)
-
-    @staticmethod
-    def _looks_like_lrc(text: str) -> bool:
-        """
-        粗略判断文本是否为 LRC 格式（包含 [mm:ss.xx] 时间戳）
-
-        Args:
-            text: 待检测文本
-
-        Returns:
-            是否可能是 LRC 格式
-        """
-        import re
-        return bool(re.search(r'\[\d{1,2}:\d{1,2}[.:]\d{1,3}\]', text))
     
+    def _show_song_info(self, song_name: str, singer: str):
+        """切歌时显示歌曲信息 3 秒后恢复。"""
+        if not song_name and not singer:
+            return
+        info = f"{song_name} - {singer}" if singer else song_name
+        duration = self.config.get('lyrics', 'song_info_duration_s', default=3)
+        print(f"[Sync] 切换歌曲: {info}")
+        self.hid.set_text_layout(TextLayout.CENTER)
+        self.hid.send_text(f"{info}")
+        # 显示期间跳过歌词更新
+        self._song_transition = True
+        # 用 Event.wait 实现可中断的等待
+        if self._stop_event.wait(duration):
+            return
+        self._song_transition = False
+
     def _display_lyric(self, text: str, line_index: int = 0, total_lines: int = 1):
         """
         显示歌词
-        
+
         Args:
             text: 歌词文本
-            line_index: 行索引
+            line_index: 行索引（从 0 开始）
             total_lines: 总行数
         """
         if not text:
             return
-        
-        print(f"[Lyric] {text}")
-        
+
+        # 行号/进度指示（配置开关）
+        show_progress = self.config.get('lyrics', 'show_progress', default=True)
+        if show_progress and total_lines > 1:
+            progress_suffix = f"[{line_index + 1}/{total_lines}]"
+            text = text + progress_suffix
+
         # 截断过长的文本
         max_chars = self.config.get('lyrics', 'max_chars_per_line', default=20)
         text = text[:max_chars]
@@ -295,23 +329,33 @@ def check_status():
     print("  编辑 ~/.halo_lrc_sync/config.json 中的 source.type")
 
 
+def hide_console():
+    """隐藏控制台窗口（Windows），实现后台运行。"""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetConsoleWindow.restype = ctypes.c_void_p
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            kernel32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass
+
+
 def main():
     """主函数"""
-    print("=" * 60)
-    print("HALO PIXELBAR 歌词同步器")
-    print("(内存读取 + HID协议)")
-    print("=" * 60)
-    
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description="HALO PIXELBAR 歌词同步器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python src/main.py              # 启动同步器
-  python src/main.py --status     # 检查状态
-  python src/main.py --list-devices  # 列出HID设备
+  python src/main.py                   # 启动同步器
+  python src/main.py --minimized       # 后台运行（隐藏窗口）
+  python src/main.py --status          # 检查状态
+  python src/main.py --list-devices    # 列出HID设备
+  python src/main.py --color red       # 指定颜色
 
 前提条件:
   1. LX Music (洛雪音乐) 已安装并运行
@@ -325,47 +369,64 @@ def main():
     parser.add_argument("--send", type=str, metavar="TEXT", help="发送自定义文本到设备并退出")
     parser.add_argument("--port", type=str, help="指定设备路径")
     parser.add_argument("--config", type=str, help="配置文件路径")
+    parser.add_argument("--minimized", action="store_true",
+                        help="隐藏控制台窗口后台运行")
+    parser.add_argument("--color", type=str, default=None,
+                        choices=["white", "red", "green", "blue", "yellow", "cyan", "magenta"],
+                        help="歌词颜色（默认 white）")
     
     args = parser.parse_args()
-    
+
+    # --minimized 启动时隐藏窗口
+    if args.minimized:
+        hide_console()
+
+    print("=" * 60)
+    print("HALO PIXELBAR 歌词同步器")
+    print("(内存读取 + HID协议)")
+    if args.minimized:
+        print("(后台模式)")
+    print("=" * 60)
+
     if args.list_devices:
         list_devices()
         return
-    
+
     if args.status:
         check_status()
         return
-    
+
     if args.send:
         from src.hid_comm import get_hid_communicator
+        from src.hid_packet_builder import TextColor
         hid = get_hid_communicator()
         if not hid.connect():
             print("[FAIL] HID 设备连接失败")
             return
-        hid.send_text(args.send)
+        send_color = TextColor[args.color.upper()] if args.color else None
+        hid.send_text(args.send, color=send_color)
         print(f"[OK] 已发送: {args.send}")
         hid.disconnect()
         return
-    
+
     # 初始化
     if args.config:
         get_config(args.config)
-    
-    # 创建并启动同步器
+
+    # --color 覆盖配置
+    if args.color:
+        config = get_config()
+        config.set('hid', 'color', value=args.color)
+
     synchronizer = LyricSynchronizer()
-    
-    # 如果指定了设备路径
+
     if args.port:
         print(f"[Main] 使用指定设备: {args.port}")
         synchronizer.hid.connect(args.port)
-    
+
     try:
         synchronizer.start()
-        
-        # 保持主线程运行
-        while synchronizer.running:
-            time.sleep(1)
-            
+        synchronizer._stop_event.wait()
     except KeyboardInterrupt:
         print("\n[Main] 用户中断")
     finally:
